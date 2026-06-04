@@ -245,6 +245,23 @@ export const api = {
     return request<Record<string, any>[]>('/api/v1/cluster/checkpoints');
   },
 
+  // Pipeline Control
+  async stopPipeline(): Promise<{ message: string }> {
+    return request<{ message: string }>('/api/v1/pipeline/stop', {
+      method: 'POST',
+    });
+  },
+
+  async startPipeline(): Promise<{ message: string }> {
+    return request<{ message: string }>('/api/v1/pipeline/start', {
+      method: 'POST',
+    });
+  },
+
+  async getPipelineStatus(): Promise<{ pipeline_state: string }> {
+    return request<{ pipeline_state: string }>('/api/v1/pipeline/status');
+  },
+
   // WebSocket Connection Helper
   getWebSocketUrl(wsPath: string): string {
     const { baseUrl, token } = getConnectionConfig();

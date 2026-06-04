@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import {
   Server, Activity, Database, Play, Square, RefreshCw, CheckCircle,
   AlertCircle, GitBranch, ArrowRight, Lock, Settings, Layers, Cpu, Zap,
-  Trash2, Pause, PlayCircle, Info, Radio, Network, HelpCircle
+  Trash2, Pause, PlayCircle, Info, Radio, Network, HelpCircle, PlusCircle
 } from 'lucide-react';
 import {
   api,
@@ -117,6 +117,23 @@ export default function App() {
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(null);
+
+  // Wizard state
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [wizardRelationType, setWizardRelationType] = useState<'source' | 'sink' | 'stream' | 'mv' | ''>('');
+  const [wizardName, setWizardName] = useState('');
+  const [wizardConnector, setWizardConnector] = useState('');
+  const [wizardConfig, setWizardConfig] = useState<Record<string, string>>({});
+  const [wizardSourceCols, setWizardSourceCols] = useState('');
+  const [wizardWatermarkCol, setWizardWatermarkCol] = useState('');
+  const [wizardWatermarkOoo, setWizardWatermarkOoo] = useState('5 SECONDS');
+  const [wizardSinkInput, setWizardSinkInput] = useState('');
+  const [wizardStreamSql, setWizardStreamSql] = useState('');
+  const [wizardMvSql, setWizardMvSql] = useState('');
+  const [wizardGeneratedSql, setWizardGeneratedSql] = useState('');
+  const [wizardError, setWizardError] = useState('');
+  const [wizardLoading, setWizardLoading] = useState(false);
 
   // Load connection config on startup
   useEffect(() => {
@@ -333,6 +350,43 @@ export default function App() {
     }
   };
 
+  const isDdlStatement = (sql: string): boolean => {
+    const s = sql.trim().toUpperCase();
+    return s.startsWith('CREATE ') || s.startsWith('DROP ') || s.startsWith('ALTER ');
+  };
+
+  const executeSqlWithSuspension = async (sql: string) => {
+    const isDdl = isDdlStatement(sql);
+    let wasRunning = false;
+
+    if (isDdl) {
+      try {
+        const statusRes = await api.getPipelineStatus();
+        wasRunning = statusRes.pipeline_state === 'Running' || statusRes.pipeline_state === 'Starting';
+        if (wasRunning) {
+          setSqlMessage('Suspending streaming pipeline...');
+          await api.stopPipeline();
+        }
+      } catch (e) {
+        console.warn('Failed to stop pipeline, proceeding anyway:', e);
+      }
+    }
+
+    const res = await api.executeSql(sql);
+
+    if (isDdl && wasRunning) {
+      try {
+        setSqlMessage('Restarting streaming pipeline...');
+        await api.startPipeline();
+        setSqlMessage('DDL executed and pipeline restarted successfully.');
+      } catch (e: any) {
+        throw new Error(`DDL succeeded, but failed to restart pipeline: ${e.message}`);
+      }
+    }
+
+    return res;
+  };
+
   // SQL worksheet execution (G0 snapshot)
   const handleExecuteSql = async () => {
     stopTailing();
@@ -341,16 +395,72 @@ export default function App() {
     setSqlMessage('');
     setSqlError('');
     try {
-      const res = await api.executeSql(sqlText);
+      const res = await executeSqlWithSuspension(sqlText);
       if (res.data) {
         setSqlResult(res.data);
+        setSqlMessage('');
       } else {
-        setSqlMessage(res.message || 'SQL executed successfully.');
+        if (!sqlMessage) {
+          setSqlMessage(res.message || 'SQL executed successfully.');
+        }
+      }
+      if (isDdlStatement(sqlText)) {
+        fetchCatalog();
       }
     } catch (e: any) {
       setSqlError(e.message || 'SQL execution failed.');
     } finally {
       setSqlLoading(false);
+    }
+  };
+
+  const generateWizardSql = () => {
+    let sql = '';
+    if (wizardRelationType === 'source') {
+      const cols = wizardSourceCols.trim() ? `(\n  ${wizardSourceCols.trim()}\n)` : '';
+      let watermark = '';
+      if (wizardWatermarkCol.trim()) {
+        const ooo = wizardWatermarkOoo.trim() || '5 SECONDS';
+        watermark = `\nWATERMARK FOR ${wizardWatermarkCol.trim()} AS ${wizardWatermarkCol.trim()} - INTERVAL '${ooo}'`;
+      }
+      
+      const configPairs = Object.entries(wizardConfig)
+        .filter(([_, v]) => v.trim() !== '')
+        .map(([k, v]) => `  '${k}' = '${v}'`)
+        .join(',\n');
+      
+      const withClause = configPairs ? `WITH (\n${configPairs}\n)` : '';
+      
+      sql = `CREATE SOURCE ${wizardName}\n${cols}${watermark}\nFROM ${wizardConnector.toUpperCase()}\n${withClause};`;
+    } else if (wizardRelationType === 'sink') {
+      const configPairs = Object.entries(wizardConfig)
+        .filter(([_, v]) => v.trim() !== '')
+        .map(([k, v]) => `  '${k}' = '${v}'`)
+        .join(',\n');
+      
+      const withClause = configPairs ? `WITH (\n${configPairs}\n)` : '';
+      
+      sql = `CREATE SINK ${wizardName}\nFROM ${wizardSinkInput}\nINTO ${wizardConnector.toUpperCase()}\n${withClause};`;
+    } else if (wizardRelationType === 'stream') {
+      sql = `CREATE STREAM ${wizardName} AS\n${wizardStreamSql.trim()};`;
+    } else if (wizardRelationType === 'mv') {
+      sql = `CREATE MATERIALIZED VIEW ${wizardName} AS\n${wizardMvSql.trim()};`;
+    }
+    setWizardGeneratedSql(sql);
+  };
+
+  const executeWizardSql = async () => {
+    setWizardLoading(true);
+    setWizardError('');
+    try {
+      await executeSqlWithSuspension(wizardGeneratedSql);
+      setShowWizard(false);
+      fetchCatalog();
+      alert('Relation created successfully!');
+    } catch (e: any) {
+      setWizardError(e.message || 'Failed to create relation.');
+    } finally {
+      setWizardLoading(false);
     }
   };
 
@@ -1033,6 +1143,29 @@ export default function App() {
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'hsl(var(--text-muted))', paddingLeft: 8, paddingBottom: 6 }}>
                       Object Browser
                     </span>
+                    <button
+                      className="btn btn-primary"
+                      style={{ margin: '8px 0', padding: '8px 12px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%' }}
+                      onClick={() => {
+                        setShowWizard(true);
+                        setWizardStep(1);
+                        setWizardRelationType('');
+                        setWizardName('');
+                        setWizardConnector('');
+                        setWizardConfig({});
+                        setWizardSourceCols('');
+                        setWizardWatermarkCol('');
+                        setWizardWatermarkOoo('5 SECONDS');
+                        setWizardSinkInput('');
+                        setWizardStreamSql('');
+                        setWizardMvSql('');
+                        setWizardGeneratedSql('');
+                        setWizardError('');
+                      }}
+                    >
+                      <PlusCircle size={14} />
+                      <span>Add Relation</span>
+                    </button>
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                       <div className="sidebar-section-title">
                         <Database size={10} />
@@ -1483,6 +1616,311 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Wizard Modal */}
+      {showWizard && (
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0, 0, 0, 0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div className="glass-card" style={{ maxWidth: 640, width: '100%', maxHeight: '90vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20, padding: '24px 30px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-translucent)', paddingBottom: 12 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Add Relation Wizard</h2>
+              <button style={{ background: 'transparent', border: 'none', color: 'hsl(var(--text-muted))', fontSize: 20, cursor: 'pointer' }} onClick={() => setShowWizard(false)}>&times;</button>
+            </div>
+
+            {/* Step indicators */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ fontWeight: wizardStep === 1 ? '700' : 'normal', color: wizardStep === 1 ? '#8b5cf6' : 'hsl(var(--text-muted))' }}>1. Type Selection</div>
+              <div style={{ fontWeight: wizardStep === 2 ? '700' : 'normal', color: wizardStep === 2 ? '#8b5cf6' : 'hsl(var(--text-muted))' }}>2. Configuration</div>
+              <div style={{ fontWeight: wizardStep === 3 ? '700' : 'normal', color: wizardStep === 3 ? '#8b5cf6' : 'hsl(var(--text-muted))' }}>3. Review & Execute</div>
+            </div>
+
+            {wizardError && (
+              <div className="glass-card" style={{ borderColor: 'hsl(var(--status-error))', background: 'rgba(239, 68, 68, 0.05)', color: 'hsl(var(--status-error))', padding: 12 }}>
+                {wizardError}
+              </div>
+            )}
+
+            {/* STEP 1: Select Relation Type */}
+            {wizardStep === 1 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--text-secondary))' }}>What kind of relation do you want to create?</label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div
+                    className={`sidebar-item ${wizardRelationType === 'source' ? 'active' : ''}`}
+                    style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-translucent)', cursor: 'pointer', textAlign: 'center' }}
+                    onClick={() => setWizardRelationType('source')}
+                  >
+                    <Database size={24} style={{ margin: '0 auto 8px', color: '#10b981' }} />
+                    <div style={{ fontWeight: 600 }}>Source</div>
+                    <div style={{ fontSize: 11, color: 'hsl(var(--text-muted))', marginTop: 4 }}>Ingest external events (Kafka, CDC, WebSocket, etc.)</div>
+                  </div>
+
+                  <div
+                    className={`sidebar-item ${wizardRelationType === 'sink' ? 'active' : ''}`}
+                    style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-translucent)', cursor: 'pointer', textAlign: 'center' }}
+                    onClick={() => setWizardRelationType('sink')}
+                  >
+                    <Radio size={24} style={{ margin: '0 auto 8px', color: '#fbbf24' }} />
+                    <div style={{ fontWeight: 600 }}>Sink</div>
+                    <div style={{ fontSize: 11, color: 'hsl(var(--text-muted))', marginTop: 4 }}>Output data stream to an external service/database</div>
+                  </div>
+
+                  <div
+                    className={`sidebar-item ${wizardRelationType === 'stream' ? 'active' : ''}`}
+                    style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-translucent)', cursor: 'pointer', textAlign: 'center' }}
+                    onClick={() => setWizardRelationType('stream')}
+                  >
+                    <Zap size={24} style={{ margin: '0 auto 8px', color: '#3b82f6' }} />
+                    <div style={{ fontWeight: 600 }}>Stream</div>
+                    <div style={{ fontSize: 11, color: 'hsl(var(--text-muted))', marginTop: 4 }}>Continuous query to transform streaming data</div>
+                  </div>
+
+                  <div
+                    className={`sidebar-item ${wizardRelationType === 'mv' ? 'active' : ''}`}
+                    style={{ padding: 16, borderRadius: 8, border: '1px solid var(--border-translucent)', cursor: 'pointer', textAlign: 'center' }}
+                    onClick={() => setWizardRelationType('mv')}
+                  >
+                    <Layers size={24} style={{ margin: '0 auto 8px', color: '#8b5cf6' }} />
+                    <div style={{ fontWeight: 600 }}>Materialized View</div>
+                    <div style={{ fontSize: 11, color: 'hsl(var(--text-muted))', marginTop: 4 }}>Persist stream state for low-latency point-in-time reads</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button
+                    className="btn btn-primary"
+                    disabled={!wizardRelationType}
+                    onClick={() => setWizardStep(2)}
+                  >
+                    <span>Next</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: Configuration */}
+            {wizardStep === 2 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Relation Name</label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="my_relation_name"
+                    value={wizardName}
+                    onChange={(e) => setWizardName(e.target.value)}
+                  />
+                </div>
+
+                {/* SOURCE Configuration */}
+                {wizardRelationType === 'source' && (
+                  <>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Ingestion Connector Type</label>
+                      <select
+                        className="input-field"
+                        style={{ background: '#12121c', color: '#fff', width: '100%' }}
+                        value={wizardConnector}
+                        onChange={(e) => {
+                          setWizardConnector(e.target.value);
+                          setWizardConfig({});
+                        }}
+                      >
+                        <option value="">Select a connector...</option>
+                        {connectors?.sources.map((c) => (
+                          <option key={c.name} value={c.name}>{c.display_name || c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {wizardConnector && connectors && (
+                      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border-translucent)', padding: 12, borderRadius: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(var(--text-muted))' }}>CONNECTOR OPTIONS</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                          {connectors.sources.find(c => c.name === wizardConnector)?.config_keys.map(opt => (
+                            <div key={opt.key}>
+                              <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 4 }}>
+                                {opt.key} {opt.required && <span style={{ color: 'hsl(var(--status-error))' }}>*</span>}
+                              </label>
+                              <input
+                                type="text"
+                                className="input-field"
+                                style={{ fontSize: 12, padding: '6px 10px' }}
+                                placeholder={opt.default || opt.description}
+                                value={wizardConfig[opt.key] || ''}
+                                onChange={(e) => setWizardConfig({ ...wizardConfig, [opt.key]: e.target.value })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>
+                        Columns Definition (Optional for schema discovery)
+                      </label>
+                      <textarea
+                        className="input-field"
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: 12, height: 80 }}
+                        placeholder="id BIGINT, device_name VARCHAR, temperature DOUBLE"
+                        value={wizardSourceCols}
+                        onChange={(e) => setWizardSourceCols(e.target.value)}
+                      />
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Watermark Column (Optional)</label>
+                        <input
+                          type="text"
+                          className="input-field"
+                          placeholder="ts"
+                          value={wizardWatermarkCol}
+                          onChange={(e) => setWizardWatermarkCol(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Out Of Orderness Tolerance</label>
+                        <input
+                          type="text"
+                          className="input-field"
+                          placeholder="5 SECONDS"
+                          value={wizardWatermarkOoo}
+                          onChange={(e) => setWizardWatermarkOoo(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* SINK Configuration */}
+                {wizardRelationType === 'sink' && (
+                  <>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Upstream Input (Stream or Source)</label>
+                      <select
+                        className="input-field"
+                        style={{ background: '#12121c', color: '#fff', width: '100%' }}
+                        value={wizardSinkInput}
+                        onChange={(e) => setWizardSinkInput(e.target.value)}
+                      >
+                        <option value="">Select input relation...</option>
+                        {streams.map((s) => <option key={s.name} value={s.name}>{s.name} (Stream)</option>)}
+                        {sources.map((s) => <option key={s.name} value={s.name}>{s.name} (Source)</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Egress Connector Type</label>
+                      <select
+                        className="input-field"
+                        style={{ background: '#12121c', color: '#fff', width: '100%' }}
+                        value={wizardConnector}
+                        onChange={(e) => {
+                          setWizardConnector(e.target.value);
+                          setWizardConfig({});
+                        }}
+                      >
+                        <option value="">Select a connector...</option>
+                        {connectors?.sinks.map((c) => (
+                          <option key={c.name} value={c.name}>{c.display_name || c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {wizardConnector && connectors && (
+                      <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border-translucent)', padding: 12, borderRadius: 8 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'hsl(var(--text-muted))' }}>CONNECTOR OPTIONS</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+                          {connectors.sinks.find(c => c.name === wizardConnector)?.config_keys.map(opt => (
+                            <div key={opt.key}>
+                              <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 4 }}>
+                                {opt.key} {opt.required && <span style={{ color: 'hsl(var(--status-error))' }}>*</span>}
+                              </label>
+                              <input
+                                type="text"
+                                className="input-field"
+                                style={{ fontSize: 12, padding: '6px 10px' }}
+                                placeholder={opt.default || opt.description}
+                                value={wizardConfig[opt.key] || ''}
+                                onChange={(e) => setWizardConfig({ ...wizardConfig, [opt.key]: e.target.value })}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* STREAM Configuration */}
+                {wizardRelationType === 'stream' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Streaming SELECT SQL Query</label>
+                    <textarea
+                      className="input-field"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 12, height: 160 }}
+                      placeholder="SELECT device_name, COUNT(*) as count FROM signals GROUP BY device_name"
+                      value={wizardStreamSql}
+                      onChange={(e) => setWizardStreamSql(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {/* MATERIALIZED VIEW Configuration */}
+                {wizardRelationType === 'mv' && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>SELECT SQL Query</label>
+                    <textarea
+                      className="input-field"
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 12, height: 160 }}
+                      placeholder="SELECT region, SUM(amount_usd) as total_revenue FROM processed_payments GROUP BY region"
+                      value={wizardMvSql}
+                      onChange={(e) => setWizardMvSql(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+                  <button className="btn btn-secondary" onClick={() => setWizardStep(1)}>Back</button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={!wizardName || (wizardRelationType === 'source' && !wizardConnector) || (wizardRelationType === 'sink' && (!wizardConnector || !wizardSinkInput)) || (wizardRelationType === 'stream' && !wizardStreamSql) || (wizardRelationType === 'mv' && !wizardMvSql)}
+                    onClick={() => {
+                      generateWizardSql();
+                      setWizardStep(3);
+                    }}
+                  >
+                    <span>Generate SQL</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 3: Review & Execute */}
+            {wizardStep === 3 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Generated SQL DDL</label>
+                  <pre className="code-preview" style={{ maxHeight: 200, overflowY: 'auto' }}>{wizardGeneratedSql}</pre>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12 }}>
+                  <button className="btn btn-secondary" onClick={() => setWizardStep(2)} disabled={wizardLoading}>Back</button>
+                  <button
+                    className="btn btn-primary"
+                    disabled={wizardLoading}
+                    onClick={executeWizardSql}
+                  >
+                    {wizardLoading ? <RefreshCw size={14} className="animate-spin" /> : <Play size={14} />}
+                    <span>Create Relation</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
