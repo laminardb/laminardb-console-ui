@@ -97,7 +97,7 @@ export default function App() {
   } | null>(null);
 
   // SQL Worksheet
-  const [sqlText, setSqlText] = useState('SELECT * FROM __sys_metrics LIMIT 10;');
+  const [sqlText, setSqlText] = useState('-- Select a stream/source and click "Tail Stream (Live)" to tail live WebSocket events!\nSELECT * FROM signals_btcusdt;');
   const [sqlLoading, setSqlLoading] = useState(false);
   const [sqlResult, setSqlResult] = useState<Record<string, any>[] | null>(null);
   const [sqlMessage, setSqlMessage] = useState('');
@@ -438,43 +438,84 @@ export default function App() {
       );
     }
 
-    // Distribute nodes into columns
-    const columns: Record<string, GraphNode[]> = {
-      Source: [],
-      Stream: [],
-      Sink: []
+    const getNodeDetails = (node: GraphNode) => {
+      if (node.node_type === 'Stream') {
+        return 'STREAM';
+      }
+      if (!node.sql) return (node.node_type as string).toUpperCase();
+
+      if (node.node_type === 'Source') {
+        const match = node.sql.match(/FROM\s+(\w+)/i);
+        const conn = match ? match[1].toUpperCase() : '';
+        return conn ? `SOURCE • ${conn}` : 'SOURCE';
+      }
+
+      if (node.node_type === 'Sink') {
+        const match = node.sql.match(/TO\s+(\w+)/i);
+        const conn = match ? match[1].toUpperCase() : '';
+        return conn ? `SINK • ${conn}` : 'SINK';
+      }
+
+      return (node.node_type as string).toUpperCase();
     };
 
+    // Calculate topological levels for nodes using a simple propagation pass
+    const nodeLevels: Record<string, number> = {};
     graphData.nodes.forEach(n => {
-      // Map node_type values (Source, Stream, Sink, etc.)
-      const type = n.node_type || 'Stream';
-      if (columns[type]) {
-        columns[type].push(n);
-      } else {
-        columns.Stream.push(n);
-      }
+      nodeLevels[n.name] = 0;
     });
 
-    const colKeys = ['Source', 'Stream', 'Sink'];
+    // Propagate levels down the DAG edges
+    for (let i = 0; i < 10; i++) {
+      graphData.edges.forEach(edge => {
+        const fromLevel = nodeLevels[edge.from] ?? 0;
+        const toLevel = nodeLevels[edge.to] ?? 0;
+        if (toLevel <= fromLevel) {
+          nodeLevels[edge.to] = fromLevel + 1;
+        }
+      });
+    }
+
+    const maxLevel = Math.max(...Object.values(nodeLevels), 0);
+
+    // Group nodes by their calculated levels
+    const levelColumns: Record<number, GraphNode[]> = {};
+    graphData.nodes.forEach(node => {
+      const lvl = nodeLevels[node.name] ?? 0;
+      if (!levelColumns[lvl]) {
+        levelColumns[lvl] = [];
+      }
+      levelColumns[lvl].push(node);
+    });
+
     const nodeCoords: Record<string, { x: number; y: number }> = {};
-    const colWidth = 240;
     const paddingX = 80;
     const paddingY = 60;
-    const cardWidth = 170;
-    const cardHeight = 50;
+    const cardWidth = 240;
+    const cardHeight = 75;
 
-    // Calculate node coordinates
-    colKeys.forEach((key, colIdx) => {
-      const colNodes = columns[key];
-      const x = paddingX + colIdx * colWidth;
-      const totalHeight = 500;
-      const spacingY = colNodes.length > 1 ? (totalHeight - paddingY * 2 - cardHeight) / (colNodes.length - 1) : 0;
+    const minGapX = 120; // Minimum horizontal gap between columns
+    const minGapY = 40;  // Minimum vertical gap between cards
+
+    // Find the column with the maximum number of nodes
+    const maxNodesInCol = Math.max(...Object.values(levelColumns).map(cols => cols.length), 1);
+
+    // Calculate canvasWidth and canvasHeight dynamically based on graph size to prevent overlapping
+    const canvasWidth = Math.max(800, paddingX * 2 + cardWidth + maxLevel * (cardWidth + minGapX));
+    const canvasHeight = Math.max(500, paddingY * 2 + maxNodesInCol * cardHeight + (maxNodesInCol - 1) * minGapY);
+
+    const colWidth = cardWidth + minGapX;
+
+    Object.keys(levelColumns).forEach(lvlStr => {
+      const lvl = parseInt(lvlStr, 10);
+      const colNodes = levelColumns[lvl];
+      const x = paddingX + lvl * colWidth;
+      
+      const occupiedHeight = colNodes.length * cardHeight + (colNodes.length - 1) * minGapY;
+      const startY = (canvasHeight - occupiedHeight) / 2;
 
       colNodes.forEach((node, nodeIdx) => {
-        const y = colNodes.length > 1
-          ? paddingY + nodeIdx * spacingY
-          : totalHeight / 2 - cardHeight / 2;
-
+        const y = startY + nodeIdx * (cardHeight + minGapY);
         nodeCoords[node.name] = { x, y };
       });
     });
@@ -486,19 +527,59 @@ export default function App() {
 
       if (!fromCoord || !toCoord) return null;
 
-      // Start coordinate: right side of source node card
-      const startX = fromCoord.x + cardWidth;
-      const startY = fromCoord.y + cardHeight / 2;
+      // 4 possible connection points on the source (from) card
+      const fromPoints = [
+        { x: fromCoord.x + cardWidth, y: fromCoord.y + cardHeight / 2, dir: 'R' }, // Right
+        { x: fromCoord.x, y: fromCoord.y + cardHeight / 2, dir: 'L' },             // Left
+        { x: fromCoord.x + cardWidth / 2, y: fromCoord.y, dir: 'T' },              // Top
+        { x: fromCoord.x + cardWidth / 2, y: fromCoord.y + cardHeight, dir: 'B' }, // Bottom
+      ];
 
-      // End coordinate: left side of target node card
-      const endX = toCoord.x;
-      const endY = toCoord.y + cardHeight / 2;
+      // 4 possible connection points on the target (to) card
+      const toPoints = [
+        { x: toCoord.x, y: toCoord.y + cardHeight / 2, dir: 'L' },              // Left
+        { x: toCoord.x + cardWidth, y: toCoord.y + cardHeight / 2, dir: 'R' },  // Right
+        { x: toCoord.x + cardWidth / 2, y: toCoord.y, dir: 'T' },               // Top
+        { x: toCoord.x + cardWidth / 2, y: toCoord.y + cardHeight, dir: 'B' },  // Bottom
+      ];
 
-      // Control points for cubic bezier curves
-      const cp1X = startX + 50;
-      const cp1Y = startY;
-      const cp2X = endX - 50;
-      const cp2Y = endY;
+      // Find the pair of points that minimizes straight-line distance
+      let bestP1 = fromPoints[0];
+      let bestP2 = toPoints[0];
+      let minDistance = Infinity;
+
+      fromPoints.forEach(p1 => {
+        toPoints.forEach(p2 => {
+          const dist = Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2);
+          if (dist < minDistance) {
+            minDistance = dist;
+            bestP1 = p1;
+            bestP2 = p2;
+          }
+        });
+      });
+
+      const startX = bestP1.x;
+      const startY = bestP1.y;
+      const endX = bestP2.x;
+      const endY = bestP2.y;
+
+      // Position control points based on the point connection directions
+      const ctrlOffset = 40;
+      let cp1X = startX;
+      let cp1Y = startY;
+      let cp2X = endX;
+      let cp2Y = endY;
+
+      if (bestP1.dir === 'R') cp1X += ctrlOffset;
+      else if (bestP1.dir === 'L') cp1X -= ctrlOffset;
+      else if (bestP1.dir === 'T') cp1Y -= ctrlOffset;
+      else if (bestP1.dir === 'B') cp1Y += ctrlOffset;
+
+      if (bestP2.dir === 'R') cp2X += ctrlOffset;
+      else if (bestP2.dir === 'L') cp2X -= ctrlOffset;
+      else if (bestP2.dir === 'T') cp2Y -= ctrlOffset;
+      else if (bestP2.dir === 'B') cp2Y += ctrlOffset;
 
       const pathString = `M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`;
 
@@ -512,7 +593,7 @@ export default function App() {
     });
 
     return (
-      <svg width="100%" height="100%" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid meet" style={{ background: '#0e0e16' }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} preserveAspectRatio="xMidYMid meet" style={{ background: '#0e0e16' }}>
         <g>
           {links}
           {graphData.nodes.map((node) => {
@@ -529,13 +610,13 @@ export default function App() {
                 onClick={() => setSelectedGraphNode(node)}
               >
                 <rect width={cardWidth} height={cardHeight} className="node-rect" />
-                <text x="12" y="22" fill="#fff" style={{ fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
-                  {node.name.length > 20 ? `${node.name.slice(0, 17)}...` : node.name}
+                <text x="16" y="30" fill="#fff" style={{ fontSize: '14px', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
+                  {node.name.length > 25 ? `${node.name.slice(0, 22)}...` : node.name}
                 </text>
-                <text x="12" y="38" fill="hsl(var(--text-muted))" style={{ fontSize: '10px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'var(--font-sans)' }}>
-                  {node.node_type}
+                <text x="16" y="52" fill="hsl(var(--text-muted))" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'var(--font-sans)' }}>
+                  {getNodeDetails(node)}
                 </text>
-                <circle cx={cardWidth - 18} cy={cardHeight / 2} r="5" fill={node.node_type === 'Source' ? '#10b981' : node.node_type === 'Sink' ? '#fbbf24' : '#3b82f6'} />
+                <circle cx={cardWidth - 20} cy={cardHeight / 2} r="6" fill={node.node_type === 'Source' ? '#10b981' : node.node_type === 'Sink' ? '#fbbf24' : '#3b82f6'} />
               </g>
             );
           })}
@@ -907,11 +988,11 @@ export default function App() {
                     <table className="meta-table">
                       <thead>
                         <tr>
-                          <th>Epoch / Version</th>
-                          <th>Status</th>
-                          <th>Source Commit LSN</th>
-                          <th>Sink Flush Commit</th>
-                          <th>Size (Bytes)</th>
+                          <th>Checkpoint ID</th>
+                          <th>Epoch</th>
+                          <th>Sources</th>
+                          <th>Sinks</th>
+                          <th>Total Checkpoints</th>
                           <th>Created At</th>
                         </tr>
                       </thead>
@@ -925,17 +1006,13 @@ export default function App() {
                         ) : (
                           checkpoints.map((cp, idx) => (
                             <tr key={idx}>
-                              <td style={{ fontWeight: 600 }}>{cp.version ?? cp.id ?? idx}</td>
-                              <td>
-                                <span className={`badge ${cp.status === 'Completed' || cp.status === 'SUCCESS' ? 'badge-emerald' : 'badge-amber'}`}>
-                                  {cp.status || 'Active'}
-                                </span>
-                              </td>
-                              <td style={{ fontFamily: 'var(--font-mono)' }}>{cp.lsn ?? 'N/A'}</td>
-                              <td style={{ fontFamily: 'var(--font-mono)' }}>{cp.sink_commit ?? 'N/A'}</td>
-                              <td>{cp.size_bytes ?? cp.size ?? '0'}</td>
+                              <td style={{ fontWeight: 600 }}>{cp.checkpoint_id ?? 'N/A'}</td>
+                              <td style={{ fontFamily: 'var(--font-mono)' }}>{cp.epoch ?? 'N/A'}</td>
+                              <td>{cp.sources || 'None'}</td>
+                              <td>{cp.sinks || 'None'}</td>
+                              <td>{cp.total_checkpoints ?? 'N/A'}</td>
                               <td style={{ color: 'hsl(var(--text-muted))' }}>
-                                {cp.created_at ? new Date(cp.created_at).toLocaleString() : 'N/A'}
+                                {cp.timestamp_ms ? new Date(cp.timestamp_ms).toLocaleString() : 'N/A'}
                               </td>
                             </tr>
                           ))
