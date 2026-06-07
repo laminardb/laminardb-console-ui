@@ -102,7 +102,10 @@ export interface LeaderResponse {
 }
 
 export function getConnectionConfig(): ConnectionConfig {
-  const defaultUrl = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')
+  const isLocalhost = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1');
+  const isStaticHost = window.location.origin.includes('github.io') || window.location.origin.includes('vercel.app') || window.location.origin.includes('netlify.app');
+
+  const defaultUrl = isLocalhost || isStaticHost
     ? 'http://localhost:8000'
     : window.location.origin;
 
@@ -135,12 +138,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     const text = await response.text();
     let errMsg = `Request failed: ${response.status} ${response.statusText}`;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.message) errMsg = parsed.message;
-      else if (parsed.error) errMsg = parsed.error;
-    } catch {
-      if (text) errMsg = text;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.message) errMsg = parsed.message;
+        else if (parsed.error) errMsg = parsed.error;
+      } catch {
+        // ignore
+      }
+    } else if (text && text.length < 200 && !text.includes('<!DOCTYPE html>') && !text.includes('<html>')) {
+      errMsg = text;
     }
     throw new Error(errMsg);
   }
