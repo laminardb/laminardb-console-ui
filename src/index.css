@@ -1,18 +1,18 @@
-/* LaminarDB Systems-Grade Console Design System (No gradients, no glass, no glow) */
+/* LaminarDB Systems-Grade Console Design System (Light Tech Theme matching laminardb.io) */
 :root {
   /* Color Palette (laminardb.io) */
-  --bg-base: 0 0% 4%;           /* #0a0a0a */
-  --bg-surface: 0 0% 7%;        /* #111111 */
-  --bg-card: 0 0% 9%;           /* #171717 */
+  --bg-base: 210 40% 98%;         /* #f8fafc */
+  --bg-surface: 0 0% 100%;       /* #ffffff */
+  --bg-card: 0 0% 100%;          /* #ffffff */
   
-  --primary: 190 100% 42%;       /* #00b4d8 - Cyan */
-  --primary-hover: 190 81% 57%;  /* #38cbeb */
-  --primary-glow: rgba(0, 180, 216, 0.08);
+  --primary: 199 89% 48%;        /* #0ea5e9 - Cyan */
+  --primary-hover: 201 98% 39%;   /* #0284c7 */
+  --primary-glow: rgba(14, 165, 233, 0.06);
   
-  --secondary: 190 81% 57%;      /* #38cbeb */
-  --secondary-hover: 190 100% 42%;
+  --secondary: 262 83% 58%;      /* #8b5cf6 - Purple */
+  --secondary-hover: 263 70% 50%;
   
-  --accent: 190 100% 42%;        /* #00b4d8 */
+  --accent: 199 89% 48%;         /* #0ea5e9 */
   
   /* Status Colors */
   --status-success: 142 72% 45%; /* #22c55e */
@@ -20,17 +20,18 @@
   --status-error: 0 84% 60%;     /* #ef4444 */
   
   /* Text */
-  --text-primary: 0 0% 90%;      /* #e5e5e5 */
-  --text-secondary: 0 0% 60%;    /* #999999 */
-  --text-muted: 0 0% 40%;        /* #666666 */
+  --text-primary: 222 47% 11%;   /* #0f172a */
+  --text-secondary: 215 25% 27%; /* #334155 */
+  --text-muted: 215 16% 47%;     /* #64748b */
   
   /* Borders and Dividers */
-  --border-translucent: #1e1e1e;
-  --border-glow: #2a2a2a;
-  --border-active: #00b4d8;
+  --border-translucent: #e2e8f0;
+  --border-glow: #cbd5e1;
+  --border-active: #0ea5e9;
   
   /* Fonts */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
   
   /* Transitions */
@@ -44,7 +45,7 @@
   margin: 0;
   padding: 0;
   scrollbar-width: thin;
-  scrollbar-color: #2a2a2a transparent;
+  scrollbar-color: #cbd5e1 transparent;
 }
 
 body {
@@ -57,6 +58,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  color: hsl(var(--text-primary));
+  font-weight: 700;
 }
 
 #root {
@@ -74,11 +81,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2a2a;
+  background: #cbd5e1;
   border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a3a;
+  background: #94a3b8;
 }
 
 /* Layout Utilities */
@@ -105,9 +112,9 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 16px;
-  font-family: var(--font-mono);
+  font-family: var(--font-display);
   color: hsl(var(--text-primary));
   letter-spacing: -0.02em;
 }
@@ -175,8 +182,8 @@ body {
   gap: 6px;
   padding: 8px 16px;
   border-radius: 4px;
-  font-family: var(--font-mono);
-  font-weight: 500;
+  font-family: var(--font-display);
+  font-weight: 600;
   font-size: 13px;
   cursor: pointer;
   transition: all var(--transition-fast);
@@ -184,12 +191,15 @@ body {
 }
 
 .btn-primary {
-  background: hsl(var(--primary));
-  color: #000;
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
 }
 
 .btn-primary:hover {
-  background: hsl(var(--primary-hover));
+  opacity: 0.95;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.3);
 }
 
 .btn-primary:active {
@@ -197,7 +207,7 @@ body {
 }
 
 .btn-secondary {
-  background: transparent;
+  background: #ffffff;
   color: hsl(var(--text-secondary));
   border: 1px solid var(--border-translucent);
 }
@@ -205,7 +215,7 @@ body {
 .btn-secondary:hover {
   color: hsl(var(--text-primary));
   border-color: var(--border-glow);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(15, 23, 42, 0.03);
 }
 
 .btn-danger {
@@ -215,6 +225,7 @@ body {
 
 .btn-danger:hover {
   opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 /* Navigation Tabs */

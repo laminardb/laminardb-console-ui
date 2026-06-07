@@ -56,14 +56,14 @@
 }
 
 .sidebar-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(15, 23, 42, 0.04);
   color: hsl(var(--text-primary));
 }
 
 .sidebar-item.active {
   background: rgba(139, 92, 246, 0.08);
   border-color: rgba(139, 92, 246, 0.2);
-  color: hsl(var(--primary));
+  color: hsl(var(--secondary));
   font-weight: 500;
 }
 
@@ -86,7 +86,7 @@
   align-items: center;
   gap: 12px;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(15, 23, 42, 0.02);
   border: 1px solid var(--border-translucent);
   border-radius: 20px;
   font-size: 13px;
@@ -107,7 +107,7 @@
   border: 1px solid var(--border-translucent);
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.4);
+  background: #ffffff;
 }
 
 .sql-editor {
@@ -116,7 +116,7 @@
   background: transparent;
   border: none;
   padding: 16px;
-  color: #fff;
+  color: hsl(var(--text-primary));
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.6;
@@ -129,7 +129,7 @@
 
 .editor-header {
   height: 36px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(15, 23, 42, 0.02);
   border-bottom: 1px solid var(--border-translucent);
   display: flex;
   align-items: center;
@@ -159,7 +159,7 @@
   font-weight: 600;
   color: hsl(var(--text-secondary));
   border-bottom: 1px solid var(--border-translucent);
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 .meta-table td {
@@ -169,7 +169,7 @@
 }
 
 .meta-table tr:hover td {
-  background: rgba(255, 255, 255, 0.01);
+  background: rgba(15, 23, 42, 0.01);
 }
 
 /* Results section */
@@ -179,14 +179,14 @@
   flex-direction: column;
   min-height: 200px;
   border: 1px solid var(--border-translucent);
-  background: rgba(12, 12, 20, 0.6);
+  background: #ffffff;
   border-radius: 8px;
   overflow: hidden;
 }
 
 .results-header {
   height: 40px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(15, 23, 42, 0.02);
   border-bottom: 1px solid var(--border-translucent);
   display: flex;
   align-items: center;
@@ -230,7 +230,7 @@
 
 .heatmap-cell:hover {
   transform: scale(1.3);
-  box-shadow: 0 0 6px rgba(255,255,255,0.4);
+  box-shadow: 0 0 6px rgba(15, 23, 42, 0.2);
   z-index: 10;
 }
 
@@ -239,7 +239,7 @@
   width: 100%;
   height: 500px;
   position: relative;
-  background: rgba(0, 0, 0, 0.2);
+  background: #ffffff;
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border-translucent);
@@ -260,18 +260,18 @@
 
 .node-group:hover .node-rect {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.3));
+  filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.2));
 }
 
 .node-group.selected .node-rect {
   stroke: hsl(var(--primary));
   stroke-width: 2;
-  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.5));
+  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.3));
 }
 
 .link-line {
   fill: none;
-  stroke: rgba(255, 255, 255, 0.08);
+  stroke: rgba(15, 23, 42, 0.08);
   stroke-width: 2;
   transition: stroke 0.2s;
 }
@@ -306,19 +306,19 @@
 }
 
 .badge-blue {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  border: 1px solid rgba(59, 130, 246, 0.2);
 }
 
 .badge-emerald {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .badge-amber {
-  background: rgba(245, 158, 11, 0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.2);
 }

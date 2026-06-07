@@ -23,16 +23,27 @@ import type {
 import './App.css';
 
 // Helper to determine node colors in the vnode heatmap
-const getNodeColor = (nodeId: number) => {
+const getNodeColor = (nodeId: number, allNodeIds: number[]) => {
   const colors = [
-    'rgba(139, 92, 246, 0.7)',  // purple
-    'rgba(59, 130, 246, 0.7)',  // blue
-    'rgba(16, 185, 129, 0.7)',  // emerald
-    'rgba(245, 158, 11, 0.7)',  // amber
-    'rgba(236, 72, 153, 0.7)',  // pink
-    'rgba(6, 182, 212, 0.7)',   // cyan
+    'rgba(139, 92, 246, 0.8)',  // purple
+    'rgba(59, 130, 246, 0.8)',  // blue
+    'rgba(16, 185, 129, 0.8)',  // emerald
+    'rgba(245, 158, 11, 0.8)',  // amber
+    'rgba(236, 72, 153, 0.8)',  // pink
+    'rgba(6, 182, 212, 0.8)',   // cyan
+    'rgba(239, 68, 68, 0.8)',   // red
+    'rgba(14, 165, 233, 0.8)',  // sky
+    'rgba(249, 115, 22, 0.8)',  // orange
+    'rgba(34, 197, 94, 0.8)',   // green
+    'rgba(168, 85, 247, 0.8)',  // violet
+    'rgba(234, 179, 8, 0.8)',   // yellow
   ];
-  return colors[nodeId % colors.length];
+  
+  const index = allNodeIds.indexOf(nodeId);
+  if (index === -1) {
+    return colors[nodeId % colors.length];
+  }
+  return colors[index % colors.length];
 };
 
 const formatUptime = (seconds: number) => {
@@ -97,7 +108,7 @@ export default function App() {
   } | null>(null);
 
   // SQL Worksheet
-  const [sqlText, setSqlText] = useState('-- Select a stream/source and click "Tail Stream (Live)" to tail live WebSocket events!\nSELECT * FROM signals_btcusdt;');
+  const [sqlText, setSqlText] = useState('');
   const [sqlLoading, setSqlLoading] = useState(false);
   const [sqlResult, setSqlResult] = useState<Record<string, any>[] | null>(null);
   const [sqlMessage, setSqlMessage] = useState('');
@@ -740,20 +751,20 @@ export default function App() {
       {/* Header Bar */}
       <header className="header">
         <div className="brand">
-          <svg viewBox="0 0 40 40" width="24" height="24" aria-hidden="true" style={{ filter: 'drop-shadow(0 0 8px rgba(0, 180, 216, 0.5))', marginRight: '8px' }}>
+          <svg viewBox="0 0 40 40" width="24" height="24" aria-hidden="true" style={{ filter: 'drop-shadow(0 0 8px rgba(14, 165, 233, 0.35))', marginRight: '8px' }}>
             <defs>
               <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#00b4d8"/>
-                <stop offset="100%" stopColor="#38cbeb"/>
+                <stop offset="0%" stopColor="#0ea5e9"/>
+                <stop offset="100%" stopColor="#8b5cf6"/>
               </linearGradient>
             </defs>
             <path d="M4 8 C12 8,14 6,22 6 C30 6,32 10,36 10" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".4"/>
             <path d="M2 14 C10 14,14 11,22 11 C30 11,32 15,38 15" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".6"/>
             <path d="M0 20 C8 20,14 17,22 17 C30 17,32 21,40 21" stroke="url(#logo-g)" strokeWidth="3" fill="none" strokeLinecap="round"/>
             <path d="M2 26 C10 26,14 23,22 23 C30 23,32 27,38 27" stroke="url(#logo-g)" stroke-width="2.5" fill="none" strokeLinecap="round" opacity=".6"/>
-            <path d="M4 32 C12 32,14 30,22 30 C30 30,32 34,36 34" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".4"/>
+            <path d="M4 32 C12 32,14 30,22 30 C30 30,32 34,36 34" stroke="url(#logo-g)" stroke-width="2.5" fill="none" strokeLinecap="round" opacity=".4"/>
           </svg>
-          <span>LaminarDB Console</span>
+          <span>LAMINARDB.IO CONSOLE</span>
         </div>
 
         {/* Global Connection Settings bar */}
@@ -796,7 +807,7 @@ export default function App() {
 
       {/* Settings Drawer / Panel */}
       {showSettings && (
-        <div style={{ background: 'rgba(18, 18, 28, 0.95)', borderBottom: '1px solid var(--border-translucent)', padding: '20px 24px', display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'flex-end', justifyContent: 'space-between', backdropFilter: 'blur(16px)' }}>
+        <div style={{ background: 'hsla(var(--bg-surface), 0.95)', borderBottom: '1px solid var(--border-translucent)', padding: '20px 24px', display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'flex-end', justifyContent: 'space-between', backdropFilter: 'blur(16px)' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', flex: 1 }}>
             <div style={{ flex: '1 1 300px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>LaminarDB API URL</label>
@@ -1055,39 +1066,169 @@ export default function App() {
                 </div>
 
                 {/* Vnode assignments Heatmap */}
-                {vnodes && Object.keys(vnodes.vnodes).length > 0 && (
-                  <div className="glass-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14 }}>VNode Assignment Map (Partitioning)</span>
-                      <span style={{ fontSize: 11, color: 'hsl(var(--text-muted))' }}>Last Updated: {new Date(vnodes.updated_at_ms).toLocaleTimeString()}</span>
-                    </div>
-                    <div className="heatmap-grid">
-                      {Array.from({ length: 256 }).map((_, vidx) => {
-                        const ownerNodeId = vnodes.vnodes[vidx];
-                        const cellColor = ownerNodeId !== undefined ? getNodeColor(ownerNodeId) : 'rgba(255,255,255,0.03)';
-                        return (
-                          <div
-                            key={`vnode-${vidx}`}
-                            className="heatmap-cell"
-                            style={{ backgroundColor: cellColor }}
-                            title={`vnode ${vidx} owned by Node ${ownerNodeId}`}
-                          >
-                            {vidx}
+                {(() => {
+                  if (!vnodes || Object.keys(vnodes.vnodes).length === 0) return null;
+                  
+                  const allNodeIds = Array.from(new Set([
+                    ...nodes.map(n => n.id),
+                    ...Object.values(vnodes.vnodes)
+                  ])).filter((id): id is number => id !== undefined && id !== null).sort((a, b) => a - b);
+
+                  const counts: Record<number, number> = {};
+                  allNodeIds.forEach(id => { counts[id] = 0; });
+                  let unassigned = 0;
+                  Object.values(vnodes.vnodes).forEach(nodeId => {
+                    if (nodeId === undefined || nodeId === null) {
+                      unassigned++;
+                    } else {
+                      counts[nodeId] = (counts[nodeId] || 0) + 1;
+                    }
+                  });
+
+                  const activeNodeIds = nodes.map(n => n.id);
+                  const assignedCounts = activeNodeIds.map(id => counts[id] || 0);
+                  
+                  let balanceStatus = 'Balanced';
+                  let balanceColor = 'hsl(var(--status-success))';
+                  
+                  if (assignedCounts.length > 1) {
+                    const maxVal = Math.max(...assignedCounts);
+                    const minVal = Math.min(...assignedCounts);
+                    const diff = maxVal - minVal;
+                    
+                    if (unassigned > 0) {
+                      balanceStatus = `${unassigned} Unassigned VNodes`;
+                      balanceColor = 'hsl(var(--status-error))';
+                    } else if (diff <= 2) {
+                      balanceStatus = 'Optimally Balanced';
+                      balanceColor = 'hsl(var(--status-success))';
+                    } else if (diff <= 15) {
+                      balanceStatus = 'Slightly Imbalanced';
+                      balanceColor = 'hsl(var(--status-warning))';
+                    } else {
+                      balanceStatus = 'Imbalanced';
+                      balanceColor = 'hsl(var(--status-error))';
+                    }
+                  } else if (assignedCounts.length === 1) {
+                    balanceStatus = 'Single Node Cluster';
+                    balanceColor = 'hsl(var(--status-info))';
+                  } else {
+                    balanceStatus = 'No Active Nodes';
+                    balanceColor = 'hsl(var(--status-error))';
+                  }
+
+                  return (
+                    <div className="glass-card" style={{ padding: 20 }}>
+                      <div className="grid-container grid-cols-2" style={{ gap: 24 }}>
+                        {/* Left Column: Heatmap Grid */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 600, fontSize: 14 }}>VNode Assignment Map</span>
+                            <span style={{ fontSize: 11, color: 'hsl(var(--text-muted))' }}>
+                              v{vnodes.version} &bull; Updated: {new Date(vnodes.updated_at_ms).toLocaleTimeString()}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                    {/* Map Legend */}
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 16 }}>
-                      {nodes.map(node => (
-                        <div key={`legend-${node.id}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: getNodeColor(node.id), display: 'inline-block' }} />
-                          <span style={{ color: 'hsl(var(--text-secondary))' }}>Node {node.id} ({node.name})</span>
+                          
+                          <div style={{ maxWidth: '380px', width: '100%' }}>
+                            <div className="heatmap-grid" style={{ maxWidth: '380px', margin: 0 }}>
+                              {Array.from({ length: 256 }).map((_, vidx) => {
+                                const ownerNodeId = vnodes.vnodes[vidx];
+                                const cellColor = ownerNodeId !== undefined ? getNodeColor(ownerNodeId, allNodeIds) : 'hsl(var(--bg-base))';
+                                const nodeObj = nodes.find(n => n.id === ownerNodeId);
+                                const ownerName = nodeObj ? nodeObj.name : `Node ${ownerNodeId}`;
+                                return (
+                                  <div
+                                    key={`vnode-${vidx}`}
+                                    className="heatmap-cell"
+                                    style={{ backgroundColor: cellColor, height: 'auto' }}
+                                    title={`VNode ${vidx} owned by ${ownerNodeId !== undefined ? `${ownerName} (ID: ${ownerNodeId})` : 'Unassigned'}`}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 4 }}>
+                            {allNodeIds.map(nodeId => {
+                              const node = nodes.find(n => n.id === nodeId);
+                              const name = node ? node.name : `Node ${nodeId}`;
+                              return (
+                                <div key={`legend-${nodeId}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
+                                  <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: getNodeColor(nodeId, allNodeIds), display: 'inline-block' }} />
+                                  <span style={{ color: 'hsl(var(--text-secondary))' }}>{name}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      ))}
+
+                        {/* Right Column: Allocation & Health Metrics */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          <div>
+                            <span style={{ fontWeight: 600, fontSize: 14 }}>Partition Balance & Metrics</span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: 12 }}>
+                            <div className="glass-card" style={{ flex: 1, padding: '10px 12px', background: 'rgba(15, 23, 42, 0.01)' }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px', marginBottom: 4 }}>
+                                Balance Status
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: balanceColor, display: 'inline-block' }} />
+                                <span style={{ fontSize: 13, fontWeight: 600, color: balanceColor }}>
+                                  {balanceStatus}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="glass-card" style={{ flex: 1, padding: '10px 12px', background: 'rgba(15, 23, 42, 0.01)' }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px', marginBottom: 4 }}>
+                                Keyspace Coverage
+                              </div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: 'hsl(var(--text-primary))' }}>
+                                {((256 - unassigned) / 256 * 100).toFixed(0)}% Assigned
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>
+                              Node Allocation Breakdown
+                            </div>
+                            
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '180px', overflowY: 'auto', paddingRight: 4 }}>
+                              {allNodeIds.map(nodeId => {
+                                const node = nodes.find(n => n.id === nodeId);
+                                const name = node ? node.name : `Node ${nodeId}`;
+                                const count = counts[nodeId] || 0;
+                                const pct = ((count / 256) * 100).toFixed(1);
+                                const nodeColor = getNodeColor(nodeId, allNodeIds);
+                                const isInactive = node && node.state !== 'Active';
+
+                                return (
+                                  <div key={`breakdown-${nodeId}`} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500, color: isInactive ? 'hsl(var(--text-muted))' : 'hsl(var(--text-primary))' }}>
+                                        <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: nodeColor, display: 'inline-block' }} />
+                                        {name} {isInactive && <span style={{ fontSize: 10, color: 'hsl(var(--status-warning))' }}>({node.state})</span>}
+                                      </span>
+                                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'hsl(var(--text-secondary))' }}>
+                                        {count} VNodes ({pct}%)
+                                      </span>
+                                    </div>
+                                    <div style={{ width: '100%', height: 4, backgroundColor: 'rgba(15, 23, 42, 0.08)', borderRadius: 2, overflow: 'hidden' }}>
+                                      <div style={{ width: `${pct}%`, height: '100%', backgroundColor: nodeColor, borderRadius: 2 }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Checkpoints list */}
                 <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -1437,7 +1578,7 @@ export default function App() {
 
                   {/* Messages */}
                   {sqlMessage && (
-                    <div className="glass-card" style={{ borderColor: 'hsl(var(--status-success))', background: 'rgba(16, 185, 129, 0.05)', color: '#34d399', display: 'flex', alignItems: 'center', gap: 8, padding: 12 }}>
+                    <div className="glass-card" style={{ borderColor: 'hsl(var(--status-success))', background: 'rgba(16, 185, 129, 0.05)', color: 'hsl(var(--status-success))', display: 'flex', alignItems: 'center', gap: 8, padding: 12 }}>
                       <CheckCircle size={16} />
                       <span>{sqlMessage}</span>
                     </div>
