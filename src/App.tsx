@@ -56,8 +56,36 @@ const formatUptime = (seconds: number) => {
   if (h > 0) parts.push(`${h}h`);
   if (m > 0) parts.push(`${m}m`);
   if (s > 0 || parts.length === 0) parts.push(`${s}s`);
-  
+
   return parts.join(' ');
+};
+
+// Extract the connector name a Source ingests FROM / a Sink emits INTO.
+const getConnectorName = (node: GraphNode): string | null => {
+  if (!node.sql) return null;
+  if (node.node_type === 'Source') {
+    const m = node.sql.match(/\bFROM\s+([A-Za-z_]\w*)/i);
+    return m ? m[1].toUpperCase() : null;
+  }
+  if (node.node_type === 'Sink') {
+    const m = node.sql.match(/\bINTO\s+([A-Za-z_]\w*)/i);
+    return m ? m[1].toUpperCase() : null;
+  }
+  return null;
+};
+
+// Parse the `WITH ('key' = 'value', ...)` options block from a relation's DDL.
+const parseRelationConfig = (sql?: string): { key: string; value: string }[] => {
+  if (!sql) return [];
+  const withMatch = sql.match(/\bWITH\s*\(([\s\S]*)\)/i);
+  if (!withMatch) return [];
+  const pairs: { key: string; value: string }[] = [];
+  const re = /['"]?([\w.\-]+)['"]?\s*=\s*['"]([^'"]*)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(withMatch[1])) !== null) {
+    pairs.push({ key: m[1], value: m[2] });
+  }
+  return pairs;
 };
 
 export default function App() {
@@ -106,6 +134,7 @@ export default function App() {
     state?: string;
     details?: any;
   } | null>(null);
+  const [dropLoading, setDropLoading] = useState(false);
 
   // SQL Worksheet
   const [sqlText, setSqlText] = useState('');
@@ -138,7 +167,8 @@ export default function App() {
   const [wizardConfig, setWizardConfig] = useState<Record<string, string>>({});
   const [wizardSourceCols, setWizardSourceCols] = useState('');
   const [wizardWatermarkCol, setWizardWatermarkCol] = useState('');
-  const [wizardWatermarkOoo, setWizardWatermarkOoo] = useState('5 SECONDS');
+  const [wizardWatermarkDelay, setWizardWatermarkDelay] = useState('5');
+  const [wizardWatermarkUnit, setWizardWatermarkUnit] = useState('SECOND');
   const [wizardSinkInput, setWizardSinkInput] = useState('');
   const [wizardStreamSql, setWizardStreamSql] = useState('');
   const [wizardMvSql, setWizardMvSql] = useState('');
@@ -426,32 +456,41 @@ export default function App() {
   };
 
   const generateWizardSql = () => {
+    // Build the `'key' = 'value'` lines for a connector option block.
+    const connectorOptionLines = () =>
+      Object.entries(wizardConfig)
+        .filter(([, v]) => v.trim() !== '')
+        .map(([k, v]) => `  '${k}' = '${v.trim()}'`)
+        .join(',\n');
+
     let sql = '';
     if (wizardRelationType === 'source') {
-      const cols = wizardSourceCols.trim() ? `(\n  ${wizardSourceCols.trim()}\n)` : '';
-      let watermark = '';
+      const connector = wizardConnector.toUpperCase();
+
+      // Columns and the WATERMARK clause share a single parenthesized block,
+      // and the watermark must be the LAST item inside it.
+      const schemaParts: string[] = [];
+      const colsRaw = wizardSourceCols.trim().replace(/,\s*$/, '');
+      if (colsRaw) schemaParts.push(colsRaw);
       if (wizardWatermarkCol.trim()) {
-        const ooo = wizardWatermarkOoo.trim() || '5 SECONDS';
-        watermark = `\nWATERMARK FOR ${wizardWatermarkCol.trim()} AS ${wizardWatermarkCol.trim()} - INTERVAL '${ooo}'`;
+        const wmCol = wizardWatermarkCol.trim();
+        const qty = (wizardWatermarkDelay.trim() || '0').replace(/[^0-9]/g, '') || '0';
+        schemaParts.push(`WATERMARK FOR ${wmCol} AS ${wmCol} - INTERVAL '${qty}' ${wizardWatermarkUnit}`);
       }
-      
-      const configPairs = Object.entries(wizardConfig)
-        .filter(([_, v]) => v.trim() !== '')
-        .map(([k, v]) => `  '${k}' = '${v}'`)
-        .join(',\n');
-      
-      const withClause = configPairs ? `WITH (\n${configPairs}\n)` : '';
-      
-      sql = `CREATE SOURCE ${wizardName}\n${cols}${watermark}\nFROM ${wizardConnector.toUpperCase()}\n${withClause};`;
+      const schemaBlock = schemaParts.length ? ` (\n  ${schemaParts.join(',\n  ')}\n)` : '';
+
+      // Connector options belong INSIDE `FROM <CONNECTOR> (...)`, not a WITH clause.
+      const opts = connectorOptionLines();
+      const fromClause = opts ? `FROM ${connector} (\n${opts}\n)` : `FROM ${connector}`;
+
+      sql = `CREATE SOURCE ${wizardName}${schemaBlock}\n${fromClause};`;
     } else if (wizardRelationType === 'sink') {
-      const configPairs = Object.entries(wizardConfig)
-        .filter(([_, v]) => v.trim() !== '')
-        .map(([k, v]) => `  '${k}' = '${v}'`)
-        .join(',\n');
-      
-      const withClause = configPairs ? `WITH (\n${configPairs}\n)` : '';
-      
-      sql = `CREATE SINK ${wizardName}\nFROM ${wizardSinkInput}\nINTO ${wizardConnector.toUpperCase()}\n${withClause};`;
+      const connector = wizardConnector.toUpperCase();
+      // Connector options belong INSIDE `INTO <CONNECTOR> (...)`.
+      const opts = connectorOptionLines();
+      const intoClause = opts ? `INTO ${connector} (\n${opts}\n)` : `INTO ${connector}`;
+
+      sql = `CREATE SINK ${wizardName}\nFROM ${wizardSinkInput}\n${intoClause};`;
     } else if (wizardRelationType === 'stream') {
       sql = `CREATE STREAM ${wizardName} AS\n${wizardStreamSql.trim()};`;
     } else if (wizardRelationType === 'mv') {
@@ -472,6 +511,38 @@ export default function App() {
       setWizardError(e.message || 'Failed to create relation.');
     } finally {
       setWizardLoading(false);
+    }
+  };
+
+  // Drop the currently selected catalog relation via DROP DDL.
+  const DROP_KEYWORDS: Record<string, string> = {
+    source: 'SOURCE',
+    sink: 'SINK',
+    stream: 'STREAM',
+    mv: 'MATERIALIZED VIEW',
+  };
+
+  const handleDropRelation = async () => {
+    if (!selectedItem) return;
+    const keyword = DROP_KEYWORDS[selectedItem.type];
+    if (!keyword) return; // connectors are not droppable
+
+    const confirmed = window.confirm(
+      `Drop ${selectedItem.type.toUpperCase()} "${selectedItem.name}"?\n\n` +
+        `This permanently removes the relation. Use CASCADE manually in the SQL Console ` +
+        `if it has downstream dependents.`
+    );
+    if (!confirmed) return;
+
+    setDropLoading(true);
+    try {
+      await executeSqlWithSuspension(`DROP ${keyword} IF EXISTS ${selectedItem.name};`);
+      setSelectedItem(null);
+      fetchCatalog();
+    } catch (e: any) {
+      alert(`Failed to drop ${selectedItem.type} "${selectedItem.name}": ${e.message}`);
+    } finally {
+      setDropLoading(false);
     }
   };
 
@@ -732,7 +803,10 @@ export default function App() {
               >
                 <rect width={cardWidth} height={cardHeight} className="node-rect" />
                 <text x="16" y="30" fill="#fff" style={{ fontSize: '14px', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
-                  {node.name.length > 25 ? `${node.name.slice(0, 22)}...` : node.name}
+                  {(() => {
+                    const label = node.name || `(unnamed ${node.node_type.toLowerCase()})`;
+                    return label.length > 25 ? `${label.slice(0, 22)}...` : label;
+                  })()}
                 </text>
                 <text x="16" y="52" fill="hsl(var(--text-muted))" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'var(--font-sans)' }}>
                   {getNodeDetails(node)}
@@ -745,6 +819,20 @@ export default function App() {
       </svg>
     );
   };
+
+  // The /cluster/nodes endpoint reports peer members and can omit the local
+  // leader node. Merge the leader in (deduped by id) so it shows up in the
+  // members table and so vnode owners resolve to a name rather than a bare id.
+  const clusterMembers: NodeInfo[] = (() => {
+    const byId = new Map<number, NodeInfo>();
+    nodes.forEach((n) => byId.set(n.id, n));
+    const leader = leaderInfo?.leader;
+    if (leader && !byId.has(leader.id)) {
+      byId.set(leader.id, leader);
+    }
+    return Array.from(byId.values()).sort((a, b) => a.id - b.id);
+  })();
+  const leaderId = leaderInfo?.leader?.id;
 
   return (
     <div className="app-container">
@@ -922,10 +1010,10 @@ export default function App() {
                       <Activity size={16} style={{ color: '#10b981' }} />
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 700 }}>
-                      {nodes.length} {nodes.length === 1 ? 'Node' : 'Nodes'}
+                      {clusterMembers.length} {clusterMembers.length === 1 ? 'Node' : 'Nodes'}
                     </div>
                     <div style={{ fontSize: 12, color: 'hsl(var(--text-secondary))', marginTop: 4 }}>
-                      {nodes.filter(n => n.state === 'Active').length} active, {nodes.filter(n => n.state === 'Suspected').length} suspected
+                      {clusterMembers.filter(n => n.state === 'Active').length} active, {clusterMembers.filter(n => n.state === 'Suspected').length} suspected
                     </div>
                   </div>
 
@@ -1032,17 +1120,24 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {nodes.length === 0 ? (
+                        {clusterMembers.length === 0 ? (
                           <tr>
                             <td colSpan={7} style={{ textAlign: 'center', color: 'hsl(var(--text-muted))', padding: 20 }}>
                               No nodes discovered. Running in embedded mode or cluster disabled.
                             </td>
                           </tr>
                         ) : (
-                          nodes.map((node) => (
+                          clusterMembers.map((node) => (
                             <tr key={node.id}>
                               <td style={{ fontWeight: 600 }}>{node.id}</td>
-                              <td>{node.name}</td>
+                              <td>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                  {node.name}
+                                  {node.id === leaderId && (
+                                    <span className="badge badge-purple" style={{ fontSize: '9px', padding: '1px 5px' }}>Leader</span>
+                                  )}
+                                </span>
+                              </td>
                               <td>
                                 <span className={`badge ${node.state === 'Active' ? 'badge-emerald' : node.state === 'Suspected' ? 'badge-amber' : 'badge-purple'}`}>
                                   <span className={`pulse-dot ${node.state === 'Active' ? 'success' : 'warning'}`} style={{ marginRight: 4 }} />
@@ -1068,24 +1163,32 @@ export default function App() {
                 {/* Vnode assignments Heatmap */}
                 {(() => {
                   if (!vnodes || Object.keys(vnodes.vnodes).length === 0) return null;
-                  
+
+                  // Normalize owner ids to numbers — JSON may serialize them as
+                  // strings, which would break === lookups against node.id.
+                  const ownerOf = (vidx: number): number | undefined => {
+                    const raw = vnodes.vnodes[vidx];
+                    return raw === undefined || raw === null ? undefined : Number(raw);
+                  };
+
                   const allNodeIds = Array.from(new Set([
-                    ...nodes.map(n => n.id),
-                    ...Object.values(vnodes.vnodes)
+                    ...clusterMembers.map(n => n.id),
+                    ...Object.values(vnodes.vnodes).map(v => (v === undefined || v === null ? null : Number(v)))
                   ])).filter((id): id is number => id !== undefined && id !== null).sort((a, b) => a - b);
 
                   const counts: Record<number, number> = {};
                   allNodeIds.forEach(id => { counts[id] = 0; });
                   let unassigned = 0;
-                  Object.values(vnodes.vnodes).forEach(nodeId => {
-                    if (nodeId === undefined || nodeId === null) {
+                  Object.values(vnodes.vnodes).forEach(rawId => {
+                    if (rawId === undefined || rawId === null) {
                       unassigned++;
                     } else {
+                      const nodeId = Number(rawId);
                       counts[nodeId] = (counts[nodeId] || 0) + 1;
                     }
                   });
 
-                  const activeNodeIds = nodes.map(n => n.id);
+                  const activeNodeIds = clusterMembers.map(n => n.id);
                   const assignedCounts = activeNodeIds.map(id => counts[id] || 0);
                   
                   let balanceStatus = 'Balanced';
@@ -1132,9 +1235,9 @@ export default function App() {
                           <div style={{ maxWidth: '380px', width: '100%' }}>
                             <div className="heatmap-grid" style={{ maxWidth: '380px', margin: 0 }}>
                               {Array.from({ length: 256 }).map((_, vidx) => {
-                                const ownerNodeId = vnodes.vnodes[vidx];
+                                const ownerNodeId = ownerOf(vidx);
                                 const cellColor = ownerNodeId !== undefined ? getNodeColor(ownerNodeId, allNodeIds) : 'hsl(var(--bg-base))';
-                                const nodeObj = nodes.find(n => n.id === ownerNodeId);
+                                const nodeObj = clusterMembers.find(n => n.id === ownerNodeId);
                                 const ownerName = nodeObj ? nodeObj.name : `Node ${ownerNodeId}`;
                                 return (
                                   <div
@@ -1150,7 +1253,7 @@ export default function App() {
 
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 4 }}>
                             {allNodeIds.map(nodeId => {
-                              const node = nodes.find(n => n.id === nodeId);
+                              const node = clusterMembers.find(n => n.id === nodeId);
                               const name = node ? node.name : `Node ${nodeId}`;
                               return (
                                 <div key={`legend-${nodeId}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}>
@@ -1198,7 +1301,7 @@ export default function App() {
                             
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: '180px', overflowY: 'auto', paddingRight: 4 }}>
                               {allNodeIds.map(nodeId => {
-                                const node = nodes.find(n => n.id === nodeId);
+                                const node = clusterMembers.find(n => n.id === nodeId);
                                 const name = node ? node.name : `Node ${nodeId}`;
                                 const count = counts[nodeId] || 0;
                                 const pct = ((count / 256) * 100).toFixed(1);
@@ -1296,7 +1399,8 @@ export default function App() {
                         setWizardConfig({});
                         setWizardSourceCols('');
                         setWizardWatermarkCol('');
-                        setWizardWatermarkOoo('5 SECONDS');
+                        setWizardWatermarkDelay('5');
+                        setWizardWatermarkUnit('SECOND');
                         setWizardSinkInput('');
                         setWizardStreamSql('');
                         setWizardMvSql('');
@@ -1422,11 +1526,24 @@ export default function App() {
                 <div className="content-pane">
                   {selectedItem ? (
                     <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                      <div style={{ borderBottom: '1px solid var(--border-translucent)', paddingBottom: 12 }}>
-                        <span className="badge badge-purple" style={{ textTransform: 'uppercase', marginBottom: 6 }}>
-                          {selectedItem.type}
-                        </span>
-                        <h2 style={{ fontSize: 22, fontWeight: 700 }}>{selectedItem.name}</h2>
+                      <div style={{ borderBottom: '1px solid var(--border-translucent)', paddingBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div>
+                          <span className="badge badge-purple" style={{ textTransform: 'uppercase', marginBottom: 6 }}>
+                            {selectedItem.type}
+                          </span>
+                          <h2 style={{ fontSize: 22, fontWeight: 700 }}>{selectedItem.name}</h2>
+                        </div>
+                        {selectedItem.type !== 'connector' && (
+                          <button
+                            className="btn btn-danger"
+                            onClick={handleDropRelation}
+                            disabled={dropLoading}
+                            title={`Drop this ${selectedItem.type} (issues DROP ${DROP_KEYWORDS[selectedItem.type]} IF EXISTS)`}
+                          >
+                            {dropLoading ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            <span>Drop {selectedItem.type === 'mv' ? 'View' : selectedItem.type.charAt(0).toUpperCase() + selectedItem.type.slice(1)}</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* SQL Definition */}
@@ -1731,10 +1848,61 @@ export default function App() {
                           <span className={`badge ${selectedGraphNode.node_type === 'Source' ? 'badge-emerald' : selectedGraphNode.node_type === 'Sink' ? 'badge-amber' : 'badge-blue'}`} style={{ textTransform: 'uppercase' }}>
                             {selectedGraphNode.node_type}
                           </span>
-                          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: 'var(--font-sans)', color: '#fff' }}>{selectedGraphNode.name}</h3>
+                          <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, fontFamily: 'var(--font-sans)', color: '#fff' }}>
+                            {selectedGraphNode.name || `(unnamed ${selectedGraphNode.node_type.toLowerCase()})`}
+                          </h3>
                         </div>
                         <span style={{ fontSize: 11, color: 'hsl(var(--text-muted))' }}>AST Node details</span>
                       </div>
+
+                      {/* Connector & configuration details (for Sources & Sinks) */}
+                      {(selectedGraphNode.node_type === 'Source' || selectedGraphNode.node_type === 'Sink') && (() => {
+                        const connector = getConnectorName(selectedGraphNode);
+                        const config = parseRelationConfig(selectedGraphNode.sql);
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <h4 style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--text-secondary))', margin: 0 }}>
+                              {selectedGraphNode.node_type === 'Source' ? 'Ingestion Details' : 'Egress Details'}
+                            </h4>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 13 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: 'hsl(var(--text-muted))' }}>Name:</span>
+                                <span style={{ fontFamily: 'var(--font-mono)', color: 'hsl(var(--text-primary))' }}>
+                                  {selectedGraphNode.name || 'N/A'}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ color: 'hsl(var(--text-muted))' }}>Connector:</span>
+                                <span className={`badge ${selectedGraphNode.node_type === 'Source' ? 'badge-emerald' : 'badge-amber'}`}>
+                                  {connector || 'Unknown'}
+                                </span>
+                              </div>
+                            </div>
+                            {config.length > 0 ? (
+                              <table className="meta-table" style={{ marginTop: 4 }}>
+                                <thead>
+                                  <tr>
+                                    <th>Option Key</th>
+                                    <th>Value</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {config.map((opt) => (
+                                    <tr key={opt.key}>
+                                      <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{opt.key}</td>
+                                      <td style={{ fontFamily: 'var(--font-mono)', color: 'hsl(var(--text-secondary))' }}>{opt.value}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            ) : (
+                              <span style={{ fontSize: 12, color: 'hsl(var(--text-muted))' }}>
+                                No connector configuration parsed from the definition.
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* SQL Code for node */}
                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1922,13 +2090,29 @@ export default function App() {
                       </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Out Of Orderness Tolerance</label>
-                        <input
-                          type="text"
-                          className="input-field"
-                          placeholder="5 SECONDS"
-                          value={wizardWatermarkOoo}
-                          onChange={(e) => setWizardWatermarkOoo(e.target.value)}
-                        />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <input
+                            type="number"
+                            min={0}
+                            className="input-field"
+                            placeholder="5"
+                            style={{ flex: '0 0 90px' }}
+                            value={wizardWatermarkDelay}
+                            onChange={(e) => setWizardWatermarkDelay(e.target.value)}
+                          />
+                          <select
+                            className="input-field"
+                            style={{ background: '#12121c', color: '#fff', flex: 1 }}
+                            value={wizardWatermarkUnit}
+                            onChange={(e) => setWizardWatermarkUnit(e.target.value)}
+                          >
+                            <option value="MILLISECOND">MILLISECOND</option>
+                            <option value="SECOND">SECOND</option>
+                            <option value="MINUTE">MINUTE</option>
+                            <option value="HOUR">HOUR</option>
+                            <option value="DAY">DAY</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </>
