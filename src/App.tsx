@@ -88,6 +88,13 @@ const parseRelationConfig = (sql?: string): { key: string; value: string }[] => 
   return pairs;
 };
 
+// Tail WebSocket keepalive + auto-reconnect tuning.
+const TAIL_HEARTBEAT_INTERVAL_MS = 25000;
+const TAIL_HEARTBEAT_MAX_BUFFERED_BYTES = 1024 * 1024;
+const TAIL_RECONNECT_BASE_DELAY_MS = 1000;
+const TAIL_RECONNECT_MAX_DELAY_MS = 30000;
+const TAIL_MAX_RECONNECT_ATTEMPTS = 6;
+
 export default function App() {
   // Navigation
   const [activeTab, setActiveTab] = useState<'overview' | 'catalog' | 'worksheet' | 'lineage'>('overview');
@@ -105,6 +112,8 @@ export default function App() {
   const [leaderInfo, setLeaderInfo] = useState<{ leader: NodeInfo | null; is_leader: boolean } | null>(null);
   const [checkpoints, setCheckpoints] = useState<Record<string, any>[]>([]);
   const [clusterError, setClusterError] = useState('');
+  const [pipelineState, setPipelineState] = useState<string>('');
+  const [pipelineActionLoading, setPipelineActionLoading] = useState(false);
 
   // Performance & Telemetry metrics
   const [metricsCpu, setMetricsCpu] = useState<number>(0);
@@ -147,11 +156,19 @@ export default function App() {
   const [isTailing, setIsTailing] = useState(false);
   const [tailingStreamName, setTailingStreamName] = useState('');
   const [tailingRows, setTailingRows] = useState<Record<string, any>[]>([]);
-  const [tailingStatus, setTailingStatus] = useState<'idle' | 'initiating' | 'connected' | 'stopped' | 'failed'>('idle');
+  const [tailingStatus, setTailingStatus] = useState<'idle' | 'initiating' | 'connected' | 'reconnecting' | 'stopped' | 'failed'>('idle');
   const [tailingError, setTailingError] = useState('');
   const [tailingCount, setTailingCount] = useState(0);
   const [isTailPaused, setIsTailPaused] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
+  // True while a close is intentional (manual stop / tab switch / page unload) so
+  // the onclose handler knows not to auto-reconnect.
+  const manualStopRef = useRef<boolean>(false);
+  // SQL used for the current tail, so a reconnect re-registers the same query.
+  const tailSqlRef = useRef<string>('');
 
   // Lineage Graph
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] } | null>(null);
@@ -210,11 +227,23 @@ export default function App() {
     }
   }, [activeTab, connectionStatus, baseUrl, token]);
 
-  // Helper to disconnect WebSocket on tab change or component unmount
+  // Tear down the tail socket when leaving the worksheet tab or unmounting.
   useEffect(() => {
     return () => {
       stopTailing();
     };
+  }, [activeTab]);
+
+  // Close the tail socket cleanly on page unload.
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      manualStopRef.current = true;
+      clearReconnect();
+      clearHeartbeat();
+      if (wsRef.current) wsRef.current.close();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   const verifyConnection = async (url: string, accessTok: string) => {
@@ -320,11 +349,12 @@ export default function App() {
     try {
       setClusterError('');
       // Run these calls concurrently
-      const [nodesList, vnodesMap, leaderObj, checkpointsList] = await Promise.allSettled([
+      const [nodesList, vnodesMap, leaderObj, checkpointsList, pipelineStat] = await Promise.allSettled([
         api.getClusterNodes(),
         api.getClusterVnodes(),
         api.getClusterLeader(),
         api.getClusterCheckpoints(),
+        api.getPipelineStatus(),
         fetchMetricsData()
       ]);
 
@@ -332,6 +362,7 @@ export default function App() {
       if (vnodesMap.status === 'fulfilled') setVnodes(vnodesMap.value);
       if (leaderObj.status === 'fulfilled') setLeaderInfo(leaderObj.value);
       if (checkpointsList.status === 'fulfilled') setCheckpoints(checkpointsList.value);
+      if (pipelineStat.status === 'fulfilled') setPipelineState(pipelineStat.value.pipeline_state);
     } catch (e: any) {
       setClusterError(e.message || 'Error fetching cluster details.');
     }
@@ -391,41 +422,31 @@ export default function App() {
     }
   };
 
+  // Full streaming-pipeline suspend/resume (halts all processing cluster-wide).
+  // Distinct from DDL edits, which are hot-applied via /api/v1/sql.
+  const togglePipeline = async () => {
+    const running = pipelineState === 'Running' || pipelineState === 'Starting';
+    if (running && !window.confirm(
+      'Suspend the streaming pipeline?\n\n' +
+        'This halts all stream and materialized-view processing cluster-wide until you resume it.'
+    )) {
+      return;
+    }
+    setPipelineActionLoading(true);
+    try {
+      const res = running ? await api.stopPipeline() : await api.startPipeline();
+      alert(res.message || `Pipeline ${running ? 'suspended' : 'resumed'} successfully.`);
+      fetchClusterInfo();
+    } catch (e: any) {
+      alert(`Failed to ${running ? 'suspend' : 'resume'} pipeline: ${e.message}`);
+    } finally {
+      setPipelineActionLoading(false);
+    }
+  };
+
   const isDdlStatement = (sql: string): boolean => {
     const s = sql.trim().toUpperCase();
     return s.startsWith('CREATE ') || s.startsWith('DROP ') || s.startsWith('ALTER ');
-  };
-
-  const executeSqlWithSuspension = async (sql: string) => {
-    const isDdl = isDdlStatement(sql);
-    let wasRunning = false;
-
-    if (isDdl) {
-      try {
-        const statusRes = await api.getPipelineStatus();
-        wasRunning = statusRes.pipeline_state === 'Running' || statusRes.pipeline_state === 'Starting';
-        if (wasRunning) {
-          setSqlMessage('Suspending streaming pipeline...');
-          await api.stopPipeline();
-        }
-      } catch (e) {
-        console.warn('Failed to stop pipeline, proceeding anyway:', e);
-      }
-    }
-
-    const res = await api.executeSql(sql);
-
-    if (isDdl && wasRunning) {
-      try {
-        setSqlMessage('Restarting streaming pipeline...');
-        await api.startPipeline();
-        setSqlMessage('DDL executed and pipeline restarted successfully.');
-      } catch (e: any) {
-        throw new Error(`DDL succeeded, but failed to restart pipeline: ${e.message}`);
-      }
-    }
-
-    return res;
   };
 
   // SQL worksheet execution (G0 snapshot)
@@ -436,7 +457,7 @@ export default function App() {
     setSqlMessage('');
     setSqlError('');
     try {
-      const res = await executeSqlWithSuspension(sqlText);
+      const res = await api.executeSql(sqlText);
       if (res.data) {
         setSqlResult(res.data);
         setSqlMessage('');
@@ -503,7 +524,7 @@ export default function App() {
     setWizardLoading(true);
     setWizardError('');
     try {
-      await executeSqlWithSuspension(wizardGeneratedSql);
+      await api.executeSql(wizardGeneratedSql);
       setShowWizard(false);
       fetchCatalog();
       alert('Relation created successfully!');
@@ -536,7 +557,7 @@ export default function App() {
 
     setDropLoading(true);
     try {
-      await executeSqlWithSuspension(`DROP ${keyword} IF EXISTS ${selectedItem.name};`);
+      await api.executeSql(`DROP ${keyword} IF EXISTS ${selectedItem.name};`);
       setSelectedItem(null);
       fetchCatalog();
     } catch (e: any) {
@@ -546,18 +567,53 @@ export default function App() {
     }
   };
 
-  // Ephemeral streaming tailing (G1)
-  const startTailing = async () => {
-    stopTailing();
-    setTailingStatus('initiating');
-    setTailingError('');
-    setTailingRows([]);
-    setTailingCount(0);
-    setIsTailPaused(false);
-    setIsTailing(true);
+  const clearHeartbeat = () => {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+  };
 
+  const clearReconnect = () => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  };
+
+  // Close the socket; the onclose supersede guard suppresses any reconnect.
+  const teardownSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+  };
+
+  // Schedule an auto-reconnect after an unexpected drop, with exponential backoff.
+  const scheduleReconnect = () => {
+    clearReconnect();
+    if (reconnectAttemptsRef.current >= TAIL_MAX_RECONNECT_ATTEMPTS) {
+      setTailingStatus('failed');
+      setTailingError(`Stream dropped — reconnect failed after ${TAIL_MAX_RECONNECT_ATTEMPTS} attempts.`);
+      setIsTailing(false);
+      return;
+    }
+    const attempt = reconnectAttemptsRef.current;
+    reconnectAttemptsRef.current = attempt + 1;
+    const delay = Math.min(TAIL_RECONNECT_MAX_DELAY_MS, TAIL_RECONNECT_BASE_DELAY_MS * 2 ** attempt);
+    setTailingStatus('reconnecting');
+    setTailingError(`Connection lost — reconnecting (attempt ${attempt + 1}/${TAIL_MAX_RECONNECT_ATTEMPTS})…`);
+    reconnectTimerRef.current = setTimeout(() => {
+      connectTail(tailSqlRef.current, true);
+    }, delay);
+  };
+
+  // Open (or reopen) a tail over WS. isReconnect: a first-attempt setup failure
+  // is terminal (bad SQL/auth); on a reconnect we just schedule another retry.
+  const connectTail = async (sql: string, isReconnect: boolean) => {
     try {
-      const res = await api.createQuery(sqlText);
+      const res = await api.createQuery(sql);
+      if (manualStopRef.current) return; // stopped while the query was registering
       setTailingStreamName(res.stream_id);
 
       const wsUrl = api.getWebSocketUrl(res.ws_url);
@@ -565,7 +621,25 @@ export default function App() {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) return; // superseded by a newer socket
+        reconnectAttemptsRef.current = 0;
+        setTailingError('');
         setTailingStatus('connected');
+        // Keepalive ping so idle proxies/NATs don't drop a healthy stream.
+        clearHeartbeat();
+        heartbeatRef.current = setInterval(() => {
+          if (ws.readyState !== WebSocket.OPEN) return;
+          // Outbound buffer not draining => dead pipe; close so onclose fires.
+          if (ws.bufferedAmount > TAIL_HEARTBEAT_MAX_BUFFERED_BYTES) {
+            ws.close();
+            return;
+          }
+          try {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          } catch {
+            ws.close();
+          }
+        }, TAIL_HEARTBEAT_INTERVAL_MS);
       };
 
       ws.onmessage = (event) => {
@@ -589,32 +663,51 @@ export default function App() {
         }
       };
 
+      // onerror is always followed by onclose, which drives reconnect/teardown.
       ws.onerror = () => {
-        setTailingStatus('failed');
-        setTailingError('WebSocket connection error.');
-        setIsTailing(false);
+        clearHeartbeat();
       };
 
       ws.onclose = () => {
-        setTailingStatus((status) => {
-          if (status === 'connected') return 'stopped';
-          return status;
-        });
-        setIsTailing(false);
+        if (wsRef.current !== ws) return; // superseded socket; ignore
+        clearHeartbeat();
+        if (manualStopRef.current) return; // intentional close — no reconnect
+        scheduleReconnect();
       };
 
     } catch (e: any) {
-      setTailingStatus('failed');
-      setTailingError(e.message || 'Failed to initialize ephemeral tailing stream.');
-      setIsTailing(false);
+      clearHeartbeat();
+      if (manualStopRef.current) return;
+      if (isReconnect) {
+        scheduleReconnect();
+      } else {
+        setTailingStatus('failed');
+        setTailingError(e.message || 'Failed to initialize ephemeral tailing stream.');
+        setIsTailing(false);
+      }
     }
   };
 
+  const startTailing = async () => {
+    stopTailing();
+    manualStopRef.current = false;
+    reconnectAttemptsRef.current = 0;
+    tailSqlRef.current = sqlText;
+    setTailingStatus('initiating');
+    setTailingError('');
+    setTailingRows([]);
+    setTailingCount(0);
+    setIsTailPaused(false);
+    setIsTailing(true);
+    await connectTail(sqlText, false);
+  };
+
   const stopTailing = () => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    manualStopRef.current = true;
+    clearReconnect();
+    clearHeartbeat();
+    teardownSocket();
+    reconnectAttemptsRef.current = 0;
     setIsTailing(false);
     setTailingStatus('idle');
   };
@@ -712,80 +805,50 @@ export default function App() {
       });
     });
 
-    // Generate links/edges
+    // Layout is left-to-right by level, so connect each "from" card's right edge
+    // to the "to" card's left edge with a horizontal bezier.
     const links = graphData.edges.map((edge, idx) => {
       const fromCoord = nodeCoords[edge.from];
       const toCoord = nodeCoords[edge.to];
 
       if (!fromCoord || !toCoord) return null;
 
-      // 4 possible connection points on the source (from) card
-      const fromPoints = [
-        { x: fromCoord.x + cardWidth, y: fromCoord.y + cardHeight / 2, dir: 'R' }, // Right
-        { x: fromCoord.x, y: fromCoord.y + cardHeight / 2, dir: 'L' },             // Left
-        { x: fromCoord.x + cardWidth / 2, y: fromCoord.y, dir: 'T' },              // Top
-        { x: fromCoord.x + cardWidth / 2, y: fromCoord.y + cardHeight, dir: 'B' }, // Bottom
-      ];
+      const startX = fromCoord.x + cardWidth;
+      const startY = fromCoord.y + cardHeight / 2;
+      const endX = toCoord.x - 6; // leave room for the arrowhead
+      const endY = toCoord.y + cardHeight / 2;
 
-      // 4 possible connection points on the target (to) card
-      const toPoints = [
-        { x: toCoord.x, y: toCoord.y + cardHeight / 2, dir: 'L' },              // Left
-        { x: toCoord.x + cardWidth, y: toCoord.y + cardHeight / 2, dir: 'R' },  // Right
-        { x: toCoord.x + cardWidth / 2, y: toCoord.y, dir: 'T' },               // Top
-        { x: toCoord.x + cardWidth / 2, y: toCoord.y + cardHeight, dir: 'B' },  // Bottom
-      ];
-
-      // Find the pair of points that minimizes straight-line distance
-      let bestP1 = fromPoints[0];
-      let bestP2 = toPoints[0];
-      let minDistance = Infinity;
-
-      fromPoints.forEach(p1 => {
-        toPoints.forEach(p2 => {
-          const dist = Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2);
-          if (dist < minDistance) {
-            minDistance = dist;
-            bestP1 = p1;
-            bestP2 = p2;
-          }
-        });
-      });
-
-      const startX = bestP1.x;
-      const startY = bestP1.y;
-      const endX = bestP2.x;
-      const endY = bestP2.y;
-
-      // Position control points based on the point connection directions
-      const ctrlOffset = 40;
-      let cp1X = startX;
-      let cp1Y = startY;
-      let cp2X = endX;
-      let cp2Y = endY;
-
-      if (bestP1.dir === 'R') cp1X += ctrlOffset;
-      else if (bestP1.dir === 'L') cp1X -= ctrlOffset;
-      else if (bestP1.dir === 'T') cp1Y -= ctrlOffset;
-      else if (bestP1.dir === 'B') cp1Y += ctrlOffset;
-
-      if (bestP2.dir === 'R') cp2X += ctrlOffset;
-      else if (bestP2.dir === 'L') cp2X -= ctrlOffset;
-      else if (bestP2.dir === 'T') cp2Y -= ctrlOffset;
-      else if (bestP2.dir === 'B') cp2Y += ctrlOffset;
-
-      const pathString = `M ${startX} ${startY} C ${cp1X} ${cp1Y}, ${cp2X} ${cp2Y}, ${endX} ${endY}`;
+      const dx = Math.max(40, (endX - startX) / 2);
+      const pathString = `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`;
 
       return (
         <path
           key={`link-${idx}`}
           d={pathString}
           className="link-line active"
+          markerEnd="url(#lineage-arrow)"
         />
       );
     });
 
+    const typeColor = (t: string) =>
+      t === 'Source' ? '#059669' : t === 'Sink' ? '#d97706' : '#2563eb';
+
     return (
-      <svg width="100%" height="100%" viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} preserveAspectRatio="xMidYMid meet" style={{ background: '#0e0e16' }}>
+      <svg viewBox={`0 0 ${canvasWidth} ${canvasHeight}`} preserveAspectRatio="xMidYMin meet" style={{ display: 'block', width: '100%', height: 'auto' }}>
+        <defs>
+          <marker
+            id="lineage-arrow"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(14, 165, 233, 0.6)" />
+          </marker>
+        </defs>
         <g>
           {links}
           {graphData.nodes.map((node) => {
@@ -793,6 +856,9 @@ export default function App() {
             if (!coords) return null;
 
             const isSelected = selectedGraphNode?.name === node.name;
+            const color = typeColor(node.node_type);
+            const fullName = node.name || `(unnamed ${node.node_type.toLowerCase()})`;
+            const label = fullName.length > 24 ? `${fullName.slice(0, 22)}…` : fullName;
 
             return (
               <g
@@ -801,17 +867,17 @@ export default function App() {
                 className={`node-group ${isSelected ? 'selected' : ''}`}
                 onClick={() => setSelectedGraphNode(node)}
               >
+                <title>{`${fullName} — ${getNodeDetails(node)}`}</title>
                 <rect width={cardWidth} height={cardHeight} className="node-rect" />
-                <text x="16" y="30" fill="#fff" style={{ fontSize: '14px', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
-                  {(() => {
-                    const label = node.name || `(unnamed ${node.node_type.toLowerCase()})`;
-                    return label.length > 25 ? `${label.slice(0, 22)}...` : label;
-                  })()}
+                {/* Type accent stripe */}
+                <rect x={12} y={14} width={4} height={cardHeight - 28} rx={2} fill={color} />
+                <text x={28} y={31} fill="hsl(var(--text-primary))" style={{ fontSize: '14px', fontWeight: 700, fontFamily: 'var(--font-sans)' }}>
+                  {label}
                 </text>
-                <text x="16" y="52" fill="hsl(var(--text-muted))" style={{ fontSize: '11px', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'var(--font-sans)' }}>
+                <text x={28} y={52} fill={color} style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', fontFamily: 'var(--font-sans)' }}>
                   {getNodeDetails(node)}
                 </text>
-                <circle cx={cardWidth - 20} cy={cardHeight / 2} r="6" fill={node.node_type === 'Source' ? '#10b981' : node.node_type === 'Sink' ? '#fbbf24' : '#3b82f6'} />
+                <circle cx={cardWidth - 20} cy={cardHeight / 2} r="5" fill={color} />
               </g>
             );
           })}
@@ -833,6 +899,7 @@ export default function App() {
     return Array.from(byId.values()).sort((a, b) => a.id - b.id);
   })();
   const leaderId = leaderInfo?.leader?.id;
+  const isPipelineRunning = pipelineState === 'Running' || pipelineState === 'Starting';
 
   return (
     <div className="app-container">
@@ -965,12 +1032,33 @@ export default function App() {
                           Uptime: {formatUptime(uptimeSeconds)}
                         </span>
                       )}
+                      {pipelineState && (
+                        <span className={`badge ${isPipelineRunning ? 'badge-emerald' : 'badge-amber'}`} style={{ fontSize: 11 }}>
+                          <span className={`pulse-dot ${isPipelineRunning ? 'success' : 'warning'}`} style={{ marginRight: 4 }} />
+                          Pipeline: {pipelineState}
+                        </span>
+                      )}
                     </div>
                     <p style={{ color: 'hsl(var(--text-secondary))', fontSize: 13, marginTop: 4 }}>
                       Health, topology nodes, vnode lease assignments, and coordinator states.
                     </p>
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
+                    {pipelineState && (
+                      <button
+                        className={`btn ${isPipelineRunning ? 'btn-danger' : 'btn-primary'}`}
+                        onClick={togglePipeline}
+                        disabled={pipelineActionLoading}
+                        title={isPipelineRunning
+                          ? 'Suspend all stream and materialized-view processing cluster-wide'
+                          : 'Resume streaming pipeline processing'}
+                      >
+                        {pipelineActionLoading
+                          ? <RefreshCw size={14} className="animate-spin" />
+                          : (isPipelineRunning ? <Pause size={14} /> : <PlayCircle size={14} />)}
+                        <span>{isPipelineRunning ? 'Suspend Pipeline' : 'Resume Pipeline'}</span>
+                      </button>
+                    )}
                     <button className="btn btn-secondary" onClick={reloadConfiguration} title="Reload configurations from config file">
                       <RefreshCw size={14} />
                       <span>Reload Config</span>
@@ -1708,9 +1796,9 @@ export default function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                         {isTailing && (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <span className="badge badge-emerald">
-                              <span className="pulse-dot success" style={{ marginRight: 4 }} />
-                              Live Streaming: {tailingStreamName} ({tailingStatus})
+                            <span className={`badge ${tailingStatus === 'reconnecting' ? 'badge-amber' : 'badge-emerald'}`}>
+                              <span className={`pulse-dot ${tailingStatus === 'reconnecting' ? 'warning' : 'success'}`} style={{ marginRight: 4 }} />
+                              {tailingStatus === 'reconnecting' ? 'Reconnecting' : 'Live Streaming'}: {tailingStreamName} ({tailingStatus})
                             </span>
                             <span style={{ fontSize: 12, color: 'hsl(var(--text-secondary))' }}>
                               Rows Tailed: {tailingCount}
@@ -1811,14 +1899,14 @@ export default function App() {
 
             {/* TAB: LINEAGE GRAPH */}
             {activeTab === 'lineage' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '20px', height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', flexDirection: 'row', gap: '20px', padding: '20px', height: 'calc(100vh - 56px)', overflow: 'hidden' }}>
                 {/* Visual DAG panel */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 3, minHeight: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minWidth: 0, minHeight: 0 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Stream Topology Lineage</h2>
                       <p style={{ color: 'hsl(var(--text-secondary))', fontSize: 12, marginTop: 4 }}>
-                        Click any node in the graph below to inspect its DDL definition and parameters.
+                        Click any node to inspect its DDL definition and parameters.
                       </p>
                     </div>
                     <button className="btn btn-secondary" onClick={fetchLineageGraph} disabled={graphLoading} style={{ padding: '6px 12px' }}>
@@ -1836,11 +1924,21 @@ export default function App() {
                     ) : (
                       renderLineageTopology()
                     )}
+                    {!graphLoading && graphData && graphData.nodes.length > 0 && (
+                      <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 14, padding: '6px 12px', background: 'rgba(255, 255, 255, 0.85)', border: '1px solid var(--border-translucent)', borderRadius: 8, fontSize: 11, fontWeight: 600, backdropFilter: 'blur(4px)' }}>
+                        {([['Source', '#059669'], ['Stream', '#2563eb'], ['Sink', '#d97706']] as const).map(([lbl, c]) => (
+                          <span key={lbl} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: 'hsl(var(--text-secondary))' }}>
+                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: c }} />
+                            {lbl}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Node details panel (At the Bottom) */}
-                <div style={{ flex: 2, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {/* Node details panel (right sidebar) */}
+                <div style={{ flex: '0 0 440px', minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
                   {selectedGraphNode ? (
                     <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflow: 'hidden' }}>
                       <div style={{ borderBottom: '1px solid var(--border-translucent)', paddingBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
