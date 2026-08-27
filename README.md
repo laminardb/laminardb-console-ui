@@ -1,47 +1,75 @@
 # LaminarDB Console
 
-The official administrative and operator web console for LaminarDB. Designed as a systems-grade, high-fidelity single-page application (SPA) to author, observe, and manage streaming SQL pipelines.
+An operator and development console for LaminarDB. This branch is reviewed against LaminarDB `0.30.0` at pre-merge engine branch `feature/cluster-subscriptions`, commit `f905741c3730bdf4733fd3b0501e45ab31518d89` (based on `main` commit `fb88ca9190bbcd6cf8c25242502facfba723c213`).
 
-## Features
+The console provides:
 
-- **Interactive SQL Worksheet**: Author and execute streaming DDL/DML. Support for both snapshot query execution and live real-time subscription tailing over WebSockets.
-- **Dependency & Lineage DAG**: Interactive visual topology diagram showing relationships and active streams from Sources to Sinks and Materialized Views.
-- **Catalog Schema Browser**: Detailed introspection of catalog metadata including sources, sinks, streams, materialized views, and available ingestion/emission connector options.
-- **Cluster & Partition Monitor**: Live node discovery status, coordinator leader lease tracking, rebalance events, and a 256-partition virtual node (vnode) lease assignment heatmap.
-- **Performance Telemetry**: Active performance dials for CPU utilization, resident memory (RSS) footprint, real-time event ingestion/emission rates (throughput per second), and coordinator node uptime.
-- **Secure Control Plane Access**: Full support for gated REST routes and WebSocket upgrade tokens matching LaminarDB server's authentication protocols.
+- health, readiness, pipeline lifecycle, cluster membership, leader, and exact vnode-assignment views;
+- HTTP SQL execution plus browser WebSocket subscriptions, including checkpoint-committed cluster aggregate streams;
+- source, sink, stream, materialized-view, connector, and lineage inspection;
+- current checkpoint status, manual checkpoints, managed-state accounting, and checkpoint latency views;
+- a raw Prometheus browser and charts built only from metrics registered by the pinned engine;
+- lossless handling of Rust `u64` values and Arrow integer/decimal JSON;
+- session-scoped bearer credentials, explicit mutation confirmations, secret-aware SQL/config display, keyboard-safe dialogs, reduced-motion support, and accessible status/table/chart summaries.
 
-## Tech Stack & Architecture
+The complete implementation-derived compatibility record is [docs/laminardb-v0.30-console-contract.md](docs/laminardb-v0.30-console-contract.md). Read it before using this console with a different `0.30.0` build or later engine commit.
 
-- **Core**: React 19, TypeScript, and Vite.
-- **Styling**: Systems-grade dark theme matching `laminardb.io` (`#0a0a0a` base, `#111111` card surfaces, solid `#1e1e1e` borders, and high-readability cyan `#00b4d8` highlights). Built without bloating utility CSS frameworks for maximum flexibility and performance.
-- **Network**: Communictes directly with the Axum HTTP REST and WebSocket control-plane API exposed by the `laminar-server` node.
+## Requirements
 
-## Quick Start
+- A current Node.js release supported by Vite 8 and npm.
+- A LaminarDB server whose HTTP listener is reachable by the browser. The server default is `127.0.0.1:8080`.
+- For a separately hosted console, a matching `[server].console_cors_allowed_origins` entry.
+- The `[server].console_token`, if the server configures one.
 
-### 1. Prerequisites
-Ensure you have Node.js (v18+) and npm installed, and a running LaminarDB coordinator server.
+Example server boundary:
 
-### 2. Install Dependencies
-```bash
-npm install
+```toml
+[server]
+bind = "127.0.0.1:8080"
+console_token = "replace-with-a-secret"
+console_cors_allowed_origins = ["http://localhost:5173"]
 ```
 
-### 3. Run Development Server
-Start the client server locally:
+Leaving `console_token` unset makes the control plane unauthenticated; the engine documents that as loopback/development behaviour. Leaving `console_cors_allowed_origins` unset enables its legacy permissive CORS policy.
+
+## Develop
+
 ```bash
+npm ci
 npm run dev
 ```
-Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### 4. Build for Production
-Generate the static assets bundle under `dist/` ready to be served by any static host:
+Open `http://localhost:5173`, then use Settings to enter the LaminarDB base URL and optional console token. The base URL is persisted locally; the token is held only in browser session storage. Browser WebSocket authentication necessarily places the token in the upgrade query string because the WebSocket API cannot set an Authorization header.
+
+## Verify and build
+
 ```bash
+npm test
+npm run lint
 npm run build
+npm audit
 ```
 
-## Configuring Server Connection
+`npm run build` produces static assets in `dist/`. Serve them from any static host whose origin is allowed by the LaminarDB server.
 
-Upon opening the console, toggle the **Settings** drawer to configure:
-1. **LaminarDB API URL**: The base coordinator bind address (e.g. `http://localhost:8000`).
-2. **Console Bearer Token**: The security token configured under `[server].console_token` in your server's `laminardb.toml`.
+## Important boundaries
+
+- `/health`, `/ready`, and `/metrics` are public server routes. Other console routes are bearer-protected when `console_token` is configured.
+- `Stopped` is a reachable server state even though `/health` returns HTTP 503 and `/ready` is not ready.
+- Browser subscriptions use only `/ws/{name}`. They accept protocol control frames from the client, not application messages.
+- Local `SUBSCRIBE` accepts resolved streams and materialized views and keeps retained history in memory. Cluster `SUBSCRIBE` admits only named, non-windowed managed keyed aggregate streams with planner-certified vnode distribution; MVs and other stream shapes fail closed.
+- Cluster delivery becomes visible only after whole-cluster checkpoint commits. Data is ordered only within each output partition; gateway interleaving is not a global, arrival, event-time, or SQL order.
+- Cluster `AS OF EPOCH` resumes from every partition's exclusive committed frontier using byte-bounded durable checkpoint segments. It is checkpoint-granular replay—not a named consumer acknowledgement—so a partly consumed interval can be delivered again.
+- Cluster WebSocket data carries all four of `stream_generation`, `partition`, `partition_sequence`, and `committed_epoch` (the fields are absent together on local frames); the console uses this durable identity for replay deduplication. Resume tokens are not exposed by the current WebSocket query contract.
+- Cluster start/stop peer fan-out is fire-and-forget. Success proves the local operation, not cluster-wide convergence.
+- `/api/v1/cluster/checkpoints` reports one current row, not checkpoint history. Manual `RESTORE FROM CHECKPOINT` is not implemented.
+- The schema-versioned local cluster diagnostic routes are intentionally outside console CORS and are not rendered by this SPA.
+- Connector discovery reports compiled streaming roles and option metadata, not delivery or cluster-admission guarantees.
+
+## Updating the engine pin
+
+Do not update only the version label. Once the engine feature merges, fetch `main`, record the merge SHA, diff it against the feature pin above, and update together:
+
+- `src/contract.ts`;
+- `docs/laminardb-v0.30-console-contract.md` (or the next-version contract);
+- the SHA-pinned protocol fixture suites.

@@ -5,12 +5,12 @@
   --bg-surface: 0 0% 100%;       /* #ffffff */
   --bg-card: 0 0% 100%;          /* #ffffff */
   
-  --primary: 199 89% 48%;        /* #0ea5e9 - Cyan */
-  --primary-hover: 201 98% 39%;   /* #0284c7 */
+  --primary: 201 96% 32%;        /* #0369a1 - accessible blue */
+  --primary-hover: 202 83% 25%;  /* #075985 */
   --primary-glow: rgba(14, 165, 233, 0.06);
   
-  --secondary: 262 83% 58%;      /* #8b5cf6 - Purple */
-  --secondary-hover: 263 70% 50%;
+  --secondary: 263 70% 42%;      /* #6d28d9 */
+  --secondary-hover: 263 69% 35%;
   
   --accent: 199 89% 48%;         /* #0ea5e9 */
   
@@ -30,9 +30,9 @@
   --border-active: #0ea5e9;
   
   /* Fonts */
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   
   /* Transitions */
   --transition-fast: 0.1s ease;
@@ -58,6 +58,37 @@ body {
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
   overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  background: transparent;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+:focus-visible {
+  outline: 3px solid #0e7490;
+  outline-offset: 2px;
+}
+
+.input-field:focus-visible,
+.sql-editor:focus-visible {
+  outline: 3px solid rgba(14, 116, 144, 0.28);
+  outline-offset: 0;
+  border-color: #0e7490;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -128,7 +159,8 @@ h1, h2, h3, h4, h5, h6 {
 .main-content {
   flex: 1;
   display: flex;
-  overflow: hidden;
+  min-width: 0;
+  overflow: visible;
 }
 
 /* Systems Card Style (No glass, no glow) */
@@ -247,6 +279,7 @@ h1, h2, h3, h4, h5, h6 {
   cursor: pointer;
   transition: all var(--transition-fast);
   border: 1px solid transparent;
+  background: transparent;
 }
 
 .nav-tab:hover {
@@ -257,6 +290,10 @@ h1, h2, h3, h4, h5, h6 {
   color: hsl(var(--primary));
   background: var(--primary-glow);
   border-color: var(--border-translucent);
+}
+
+.nav-tab:disabled:hover {
+  color: hsl(var(--text-muted));
 }
 
 /* Pulsing Status dot */
@@ -335,5 +372,28 @@ h1, h2, h3, h4, h5, h6 {
 @media (max-width: 768px) {
   .grid-cols-2, .grid-cols-3, .grid-cols-4 {
     grid-template-columns: 1fr;
+  }
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
