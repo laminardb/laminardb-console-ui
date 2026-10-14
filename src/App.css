@@ -832,6 +832,227 @@
   stroke-width: 3px;
 }
 
+/* Topology migrations */
+.eyebrow {
+  display: block;
+  color: hsl(var(--text-muted));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.topology-operation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.topology-operation-title {
+  min-width: 0;
+}
+
+.operation-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.topology-operation-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phase-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.phase-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--border-translucent);
+  border-radius: 999px;
+  color: hsl(var(--text-muted));
+  font-size: 11px;
+}
+
+.phase-dot {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.phase-done {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.phase-done .phase-dot {
+  background: currentColor;
+}
+
+.phase-current {
+  border-color: #7dd3fc;
+  background: #f0f9ff;
+  color: #075985;
+  font-weight: 600;
+}
+
+.phase-current .phase-dot {
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+}
+
+.phase-aborted {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #854d0e;
+  font-weight: 600;
+}
+
+.phase-description {
+  color: hsl(var(--text-secondary));
+  font-size: 12px;
+}
+
+.kv-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.kv-grid dt {
+  color: hsl(var(--text-muted));
+}
+
+.kv-grid dd {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.statement-details summary {
+  cursor: pointer;
+  color: hsl(var(--text-secondary));
+  font-size: 12px;
+}
+
+.statement-details ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 22px;
+  font-size: 11px;
+}
+
+.statement-details code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.guidance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: hsl(var(--text-secondary));
+  font-size: 12px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.checkbox-row input {
+  margin-top: 3px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.lookup-form {
+  display: flex;
+  gap: 8px;
+  min-width: min(100%, 380px);
+}
+
+.lookup-form .input-field {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.subheading {
+  margin-bottom: 6px;
+  color: hsl(var(--text-secondary));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sql-input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* Connector health */
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.grid-span-all {
+  grid-column: 1 / -1;
+  min-height: 70px;
+}
+
+.table-card-header {
+  flex-wrap: wrap;
+  align-items: baseline;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-translucent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mode-chip {
+  display: inline-block;
+  margin: 1px 4px 1px 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  white-space: nowrap;
+}
+
+.capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 @media (max-width: 1200px) {
   .header {
     align-items: flex-start;
@@ -910,5 +1131,17 @@
 
   .relation-dialog {
     padding: 18px !important;
+  }
+
+  .kv-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kv-grid dd {
+    margin-bottom: 4px;
+  }
+
+  .lookup-form {
+    min-width: 0;
   }
 }

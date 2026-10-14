@@ -30,7 +30,7 @@ describe('application shell', () => {
     expect(screen.getByRole('heading', { name: 'LaminarDB Console' })).toBeInTheDocument();
     expect(screen.getByLabelText('LaminarDB API URL')).toHaveValue('http://localhost:8080');
     expect(screen.getByRole('button', { name: 'Overview' })).toBeDisabled();
-    expect(screen.getByText(/f905741c/)).toBeInTheDocument();
+    expect(screen.getByText(/bd8f85e8/)).toBeInTheDocument();
 
     // jsdom has no canvas implementation, so contrast is verified from the
     // design tokens while the remaining axe rules run here.

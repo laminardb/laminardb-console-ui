@@ -61,6 +61,23 @@ export interface ConfigKeySpec {
   default: string | null;
 }
 
+/** `SchemaDiscovery`: explicit | built_in | metadata | query (snake_case). */
+export type SchemaDiscovery = 'explicit' | 'built_in' | 'metadata' | 'query';
+/** `SchemaPreparation`: none | explicit_table_creation | explicit_registration. */
+export type SchemaPreparation = 'none' | 'explicit_table_creation' | 'explicit_registration';
+
+/** Direction-specific schema authority reported by `ConnectorInfo.schema_capabilities`. */
+export interface SchemaCapabilities {
+  discovery: SchemaDiscovery;
+  /** Formats with authoritative metadata; empty with `metadata` discovery means a native protocol. */
+  metadata_formats: string[];
+  /** Fixed-decoder formats; empty with `built_in` discovery means a native protocol. */
+  built_in_formats: string[];
+  query_derived: boolean;
+  bounded_sampling: boolean;
+  preparation: SchemaPreparation;
+}
+
 export interface ConnectorInfo {
   name: string;
   display_name: string;
@@ -68,6 +85,21 @@ export interface ConnectorInfo {
   is_source: boolean;
   is_sink: boolean;
   config_keys: ConfigKeySpec[];
+  /** Absent only on servers older than the 0.32 contract. */
+  schema_capabilities: SchemaCapabilities | null;
+}
+
+export type ProcessRuntime = 'native_rust' | 'remote_rust' | 'remote_python';
+
+/** GET /api/v1/process-functions. Bindings are installed at startup; this route is read-only. */
+export interface ProcessFunctionInfo {
+  output: string;
+  source: string;
+  function_id: string;
+  pipeline_state_id: string;
+  descriptor_version: number;
+  implementation_digest: string;
+  runtime: ProcessRuntime;
 }
 
 export interface ConnectorsResponse {
@@ -82,6 +114,136 @@ export interface SqlResponse {
   rows_affected?: WireU64;
   data?: Record<string, unknown>[];
   truncated?: boolean;
+  /**
+   * Running-cluster SOURCE/STREAM/SINK DDL is admitted as an asynchronous
+   * topology migration (HTTP 202). The receipt is not a completed change.
+   */
+  topology_operation?: TopologyAdmissionStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Cluster topology migrations (laminar-core cluster::control::topology)
+
+export interface CatalogManifestRef {
+  version: number;
+  sha256: string;
+  encoded_len: WireU64;
+  entry_count: number;
+}
+
+/** Explicitly adopted legacy inventory; always topology version 1. */
+export interface LegacyTopologyBaseline {
+  protocol_version: number;
+  topology_version: WireU64;
+  manifest: CatalogManifestRef;
+  deployment_id: string;
+  operation_id: string;
+  authority_sequence: WireU64;
+}
+
+/** Irreversible target catalog decision. It does not authorize output or open intake. */
+export interface TopologyCommit {
+  protocol_version: number;
+  operation_id: string;
+  parent_version: WireU64;
+  parent_manifest: CatalogManifestRef;
+  topology_version: WireU64;
+  manifest: CatalogManifestRef;
+  authority_sequence: WireU64;
+}
+
+export type TopologyCatalogState =
+  | { state: 'uninitialized' }
+  | { state: 'legacy_sealed'; manifest: CatalogManifestRef }
+  | { state: 'versioned'; baseline: LegacyTopologyBaseline; committed: TopologyCommit | null };
+
+/** GET /api/v1/cluster/topology. Activation evidence is for the answering process only. */
+export interface ClusterTopologyStatus {
+  catalog: TopologyCatalogState;
+  committed_version: WireU64 | null;
+  /** Version this process runs with live authority and intake released. */
+  locally_active_version: WireU64 | null;
+  /** Committed migration that still freezes the complete owner map. Do not rescale while set. */
+  live_migration: WireU64 | null;
+  journal: { retained: number; capacity: number };
+}
+
+export const TOPOLOGY_PHASES = [
+  'planned', 'preparing', 'quiescing', 'cut_prepared', 'committed', 'activating', 'active',
+] as const;
+export type TopologyProgressPhase = typeof TOPOLOGY_PHASES[number];
+export type TopologyAbortReason = 'requested' | 'leader_changed' | 'recovery' | 'checkpoint_aborted';
+export type TopologyAdmissionPhase =
+  | { phase: TopologyProgressPhase }
+  | { phase: 'aborted'; reason: TopologyAbortReason };
+
+/**
+ * Durable status of one payload-bound migration request. Rendered fields are
+ * validated; deeper evidence (leader proofs, cut inventory, certificates) is
+ * retained losslessly in `raw` for inspection rather than re-modelled here.
+ */
+export interface TopologyAdmissionStatus {
+  operation_id: string;
+  plan: { sha256: string; encoded_len: WireU64 };
+  admitted_sequence: WireU64;
+  status_sequence: WireU64;
+  /** Wire field `state` (Rust field `phase`), internally tagged by `phase`. */
+  state: TopologyAdmissionPhase;
+  commit: TopologyCommit | null;
+  /** Installation receipts collected for the current activation round. */
+  activation: {
+    processes: number;
+    installations: number;
+    released_sequence: WireU64 | null;
+  } | null;
+  certificates: number;
+  completed_cut_participants: number;
+  raw: Record<string, unknown>;
+}
+
+export type TopologyObjectTransition = 'preserve' | 'add_future_only' | 'remove';
+
+export interface ClusterTopologyObjectPlan {
+  name: string;
+  kind: string;
+  catalog_generation: WireU64;
+  transition: TopologyObjectTransition;
+  initialization: string;
+  definition_sha256: string;
+  compatibility_sha256: string;
+  dependencies: string[];
+  schema_sha256: string | null;
+  managed_state_contract: string | null;
+}
+
+/** POST /api/v1/cluster/topology/validate. Certifies only the answering process's local plan. */
+export interface ClusterTopologyValidation {
+  validation_format_version: number;
+  scope: string;
+  deployment_id: string;
+  parent_version: WireU64;
+  target_version: WireU64;
+  parent_manifest: CatalogManifestRef;
+  target_manifest: CatalogManifestRef;
+  environment_sha256: string;
+  compatibility_sha256: string;
+  statements: string[];
+  objects: ClusterTopologyObjectPlan[];
+  requires_processing_pause: boolean;
+  required_before_activation: string[];
+}
+
+export interface ClusterTopologyRequest {
+  operation_id: string;
+  expected_parent_version: WireU64;
+  statements: string[];
+}
+
+export interface ClusterTopologyAdoptionRequest {
+  operation_id: string;
+  expected_manifest: CatalogManifestRef;
+  expected_deployment_id: string;
+  coordinated_upgrade_complete: boolean;
 }
 
 export type CheckpointFailureDisposition = 'retryable' | 'requires_recovery';
@@ -238,18 +400,58 @@ const LEGACY_TOKEN_KEY = 'laminardb_token';
 const INTEGER_PATTERN = /^-?(?:0|[1-9]\d*)$/;
 const U64_MAX = 18_446_744_073_709_551_615n;
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
 export class ApiError extends Error {
   readonly status: number;
   readonly statusText: string;
   readonly body: unknown;
+  /** Stable `LDB-xxxx` code from topology write routes (`{error, code}` bodies). */
+  readonly code?: string;
+  /**
+   * Topology operation whose outcome may be uncertain. Read from the
+   * `x-laminar-topology-operation-id` header when CORS exposes it, otherwise
+   * from the engine's "topology operation <uuid> may be admitted" message.
+   */
+  readonly operationId?: string;
+  /** Seconds from `Retry-After` when the browser can read it (429/504 topology responses). */
+  readonly retryAfter?: number;
 
-  constructor(status: number, statusText: string, message: string, body?: unknown) {
+  constructor(
+    status: number,
+    statusText: string,
+    message: string,
+    body?: unknown,
+    details: { code?: string; operationId?: string; retryAfter?: number } = {},
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.statusText = statusText;
     this.body = body;
+    if (details.code) this.code = details.code;
+    if (details.operationId) this.operationId = details.operationId;
+    if (details.retryAfter !== undefined) this.retryAfter = details.retryAfter;
   }
+}
+
+/** True for a canonical lowercase, hyphenated, non-nil UUID (the engine's operation identity). */
+export function isOperationUuid(value: string): boolean {
+  return UUID_PATTERN.test(value) && value !== NIL_UUID;
+}
+
+/**
+ * Random v4 UUID for a new topology request. `crypto.randomUUID` exists only in
+ * secure contexts, so build it from `getRandomValues`, which consoles served over
+ * plain HTTP on a LAN host still have.
+ */
+export function newOperationId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export class ProtocolError extends Error {
@@ -370,15 +572,29 @@ async function responseBody(response: Response): Promise<{ value: unknown; text:
   return { value: text, text };
 }
 
+const UNCERTAIN_OPERATION_PATTERN = /topology operation ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}) may be admitted/;
+
+function errorDetails(response: Response, body: unknown, message: string) {
+  const code = isRecord(body) && typeof body.code === 'string' ? body.code : undefined;
+  const header = response.headers.get('x-laminar-topology-operation-id')?.trim().toLowerCase();
+  const fromMessage = UNCERTAIN_OPERATION_PATTERN.exec(message)?.[1];
+  const operationId = header && isOperationUuid(header) ? header : fromMessage;
+  const retryHeader = response.headers.get('retry-after');
+  const retryAfter = retryHeader && /^\d+$/.test(retryHeader.trim()) ? Number(retryHeader.trim()) : undefined;
+  return { code, operationId, retryAfter };
+}
+
 async function requestJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const response = await fetchEndpoint(path, options);
   const body = await responseBody(response);
   if (!response.ok && !(options.acceptedStatuses ?? []).includes(response.status)) {
+    const message = errorMessage(response.status, response.statusText, body.value, body.text);
     throw new ApiError(
       response.status,
       response.statusText,
-      errorMessage(response.status, response.statusText, body.value, body.text),
+      message,
       body.value,
+      errorDetails(response, body.value, message),
     );
   }
   if (typeof body.value === 'string') {
@@ -475,6 +691,35 @@ function normalizeConfigKey(value: unknown): ConfigKeySpec {
   };
 }
 
+function enumValue<T extends string>(value: unknown, variants: readonly T[], context: string): T {
+  const text = textValue(value, context);
+  if (!(variants as readonly string[]).includes(text)) {
+    throw new ProtocolError(`${context} '${text}' is not a supported variant.`);
+  }
+  return text as T;
+}
+
+function stringList(value: unknown, context: string): string[] {
+  return asArray(value, context).map((item) => textValue(item, `${context} item`));
+}
+
+function normalizeSchemaCapabilities(value: unknown): SchemaCapabilities | null {
+  if (value === undefined) return null;
+  const caps = asRecord(value, 'connector.schema_capabilities');
+  return {
+    discovery: enumValue(caps.discovery, ['explicit', 'built_in', 'metadata', 'query'] as const, 'schema_capabilities.discovery'),
+    metadata_formats: stringList(caps.metadata_formats, 'schema_capabilities.metadata_formats'),
+    built_in_formats: stringList(caps.built_in_formats, 'schema_capabilities.built_in_formats'),
+    query_derived: booleanValue(caps.query_derived, 'schema_capabilities.query_derived'),
+    bounded_sampling: booleanValue(caps.bounded_sampling, 'schema_capabilities.bounded_sampling'),
+    preparation: enumValue(
+      caps.preparation,
+      ['none', 'explicit_table_creation', 'explicit_registration'] as const,
+      'schema_capabilities.preparation',
+    ),
+  };
+}
+
 function normalizeConnector(value: unknown): ConnectorInfo {
   const connector = asRecord(value, 'connector');
   return {
@@ -484,7 +729,218 @@ function normalizeConnector(value: unknown): ConnectorInfo {
     is_source: booleanValue(connector.is_source, 'connector.is_source'),
     is_sink: booleanValue(connector.is_sink, 'connector.is_sink'),
     config_keys: asArray(connector.config_keys, 'connector.config_keys').map(normalizeConfigKey),
+    schema_capabilities: normalizeSchemaCapabilities(connector.schema_capabilities),
   };
+}
+
+function normalizeProcessFunction(value: unknown): ProcessFunctionInfo {
+  const binding = asRecord(value, 'process function');
+  return {
+    output: textValue(binding.output, 'process function.output'),
+    source: textValue(binding.source, 'process function.source'),
+    function_id: textValue(binding.function_id, 'process function.function_id'),
+    pipeline_state_id: textValue(binding.pipeline_state_id, 'process function.pipeline_state_id'),
+    descriptor_version: integerInRange(binding.descriptor_version, 0, 4_294_967_295, 'process function.descriptor_version'),
+    implementation_digest: textValue(binding.implementation_digest, 'process function.implementation_digest'),
+    runtime: enumValue(binding.runtime, ['native_rust', 'remote_rust', 'remote_python'] as const, 'process function.runtime'),
+  };
+}
+
+function operationUuid(value: unknown, context: string): string {
+  const text = textValue(value, context);
+  if (!isOperationUuid(text)) throw new ProtocolError(`${context} is not a non-nil lowercase UUID.`);
+  return text;
+}
+
+function nullableU64(value: unknown, context: string): WireU64 | null {
+  return value === null || value === undefined ? null : wireU64(value, context);
+}
+
+function normalizeManifest(value: unknown, context: string): CatalogManifestRef {
+  const manifest = asRecord(value, context);
+  return {
+    version: integerInRange(manifest.version, 0, 65_535, `${context}.version`),
+    sha256: textValue(manifest.sha256, `${context}.sha256`),
+    encoded_len: wireU64(manifest.encoded_len, `${context}.encoded_len`),
+    entry_count: integerInRange(manifest.entry_count, 0, 4_294_967_295, `${context}.entry_count`),
+  };
+}
+
+function normalizeBaseline(value: unknown): LegacyTopologyBaseline {
+  const baseline = asRecord(value, 'topology baseline');
+  return {
+    protocol_version: integerInRange(baseline.protocol_version, 0, 65_535, 'topology baseline.protocol_version'),
+    topology_version: wireU64(baseline.topology_version, 'topology baseline.topology_version'),
+    manifest: normalizeManifest(baseline.manifest, 'topology baseline.manifest'),
+    deployment_id: textValue(baseline.deployment_id, 'topology baseline.deployment_id'),
+    operation_id: operationUuid(baseline.operation_id, 'topology baseline.operation_id'),
+    authority_sequence: wireU64(baseline.authority_sequence, 'topology baseline.authority_sequence'),
+  };
+}
+
+function normalizeTopologyCommit(value: unknown): TopologyCommit {
+  const commit = asRecord(value, 'topology commit');
+  return {
+    protocol_version: integerInRange(commit.protocol_version, 0, 65_535, 'topology commit.protocol_version'),
+    operation_id: operationUuid(commit.operation_id, 'topology commit.operation_id'),
+    parent_version: wireU64(commit.parent_version, 'topology commit.parent_version'),
+    parent_manifest: normalizeManifest(commit.parent_manifest, 'topology commit.parent_manifest'),
+    topology_version: wireU64(commit.topology_version, 'topology commit.topology_version'),
+    manifest: normalizeManifest(commit.manifest, 'topology commit.manifest'),
+    authority_sequence: wireU64(commit.authority_sequence, 'topology commit.authority_sequence'),
+  };
+}
+
+function normalizeCatalogState(value: unknown): TopologyCatalogState {
+  const catalog = asRecord(value, 'topology catalog');
+  const state = enumValue(catalog.state, ['uninitialized', 'legacy_sealed', 'versioned'] as const, 'topology catalog.state');
+  if (state === 'uninitialized') return { state };
+  if (state === 'legacy_sealed') {
+    return { state, manifest: normalizeManifest(catalog.manifest, 'topology catalog.manifest') };
+  }
+  return {
+    state,
+    baseline: normalizeBaseline(catalog.baseline),
+    committed: catalog.committed === undefined || catalog.committed === null
+      ? null
+      : normalizeTopologyCommit(catalog.committed),
+  };
+}
+
+export function normalizeTopologyStatus(value: unknown): ClusterTopologyStatus {
+  const status = asRecord(value, 'cluster topology status');
+  const journal = asRecord(status.journal, 'cluster topology status.journal');
+  return {
+    catalog: normalizeCatalogState(status.catalog),
+    committed_version: nullableU64(status.committed_version, 'cluster topology status.committed_version'),
+    locally_active_version: nullableU64(status.locally_active_version, 'cluster topology status.locally_active_version'),
+    live_migration: nullableU64(status.live_migration, 'cluster topology status.live_migration'),
+    journal: {
+      retained: integerInRange(journal.retained, 0, Number.MAX_SAFE_INTEGER, 'topology journal.retained'),
+      capacity: integerInRange(journal.capacity, 0, Number.MAX_SAFE_INTEGER, 'topology journal.capacity'),
+    },
+  };
+}
+
+function normalizeAdmissionPhase(value: unknown): TopologyAdmissionPhase {
+  const state = asRecord(value, 'topology operation.state');
+  const phase = enumValue(state.phase, [...TOPOLOGY_PHASES, 'aborted'] as const, 'topology operation.state.phase');
+  if (phase !== 'aborted') return { phase };
+  return {
+    phase,
+    reason: enumValue(
+      state.reason,
+      ['requested', 'leader_changed', 'recovery', 'checkpoint_aborted'] as const,
+      'topology operation.state.reason',
+    ),
+  };
+}
+
+export function normalizeTopologyOperation(value: unknown): TopologyAdmissionStatus {
+  const status = asRecord(value, 'topology operation');
+  const plan = asRecord(status.plan, 'topology operation.plan');
+  let activation: TopologyAdmissionStatus['activation'] = null;
+  if (status.activation !== undefined && status.activation !== null) {
+    const round = asRecord(status.activation, 'topology operation.activation');
+    const release = round.release === undefined || round.release === null
+      ? null
+      : asRecord(round.release, 'topology operation.activation.release');
+    activation = {
+      processes: asArray(round.processes, 'topology operation.activation.processes').length,
+      installations: asArray(round.installations, 'topology operation.activation.installations').length,
+      released_sequence: release === null
+        ? null
+        : wireU64(release.authority_sequence, 'topology operation.activation.release.authority_sequence'),
+    };
+  }
+  const preparation = status.preparation === undefined || status.preparation === null
+    ? null
+    : asRecord(status.preparation, 'topology operation.preparation');
+  const cut = status.cut === undefined || status.cut === null ? null : asRecord(status.cut, 'topology operation.cut');
+  return {
+    operation_id: operationUuid(status.operation_id, 'topology operation.operation_id'),
+    plan: {
+      sha256: textValue(plan.sha256, 'topology operation.plan.sha256'),
+      encoded_len: wireU64(plan.encoded_len, 'topology operation.plan.encoded_len'),
+    },
+    admitted_sequence: wireU64(status.admitted_sequence, 'topology operation.admitted_sequence'),
+    status_sequence: wireU64(status.status_sequence, 'topology operation.status_sequence'),
+    state: normalizeAdmissionPhase(status.state),
+    commit: status.commit === undefined || status.commit === null ? null : normalizeTopologyCommit(status.commit),
+    activation,
+    certificates: preparation === null
+      ? 0
+      : asArray(preparation.certificates, 'topology operation.preparation.certificates').length,
+    completed_cut_participants: cut === null || cut.completed_participants === undefined
+      ? 0
+      : asArray(cut.completed_participants, 'topology operation.cut.completed_participants').length,
+    raw: status,
+  };
+}
+
+function normalizeObjectPlan(value: unknown): ClusterTopologyObjectPlan {
+  const object = asRecord(value, 'topology object plan');
+  const nullableText = (field: unknown, context: string) => field === null || field === undefined
+    ? null
+    : textValue(field, context);
+  return {
+    name: textValue(object.name, 'topology object plan.name'),
+    kind: textValue(object.kind, 'topology object plan.kind'),
+    catalog_generation: wireU64(object.catalog_generation, 'topology object plan.catalog_generation'),
+    transition: enumValue(object.transition, ['preserve', 'add_future_only', 'remove'] as const, 'topology object plan.transition'),
+    initialization: textValue(object.initialization, 'topology object plan.initialization'),
+    definition_sha256: textValue(object.definition_sha256, 'topology object plan.definition_sha256'),
+    compatibility_sha256: textValue(object.compatibility_sha256, 'topology object plan.compatibility_sha256'),
+    dependencies: stringList(object.dependencies, 'topology object plan.dependencies'),
+    schema_sha256: nullableText(object.schema_sha256, 'topology object plan.schema_sha256'),
+    managed_state_contract: nullableText(object.managed_state_contract, 'topology object plan.managed_state_contract'),
+  };
+}
+
+export function normalizeTopologyValidation(value: unknown): ClusterTopologyValidation {
+  const validation = asRecord(value, 'topology validation');
+  return {
+    validation_format_version: integerInRange(validation.validation_format_version, 0, 65_535, 'topology validation.validation_format_version'),
+    scope: textValue(validation.scope, 'topology validation.scope'),
+    deployment_id: textValue(validation.deployment_id, 'topology validation.deployment_id'),
+    parent_version: wireU64(validation.parent_version, 'topology validation.parent_version'),
+    target_version: wireU64(validation.target_version, 'topology validation.target_version'),
+    parent_manifest: normalizeManifest(validation.parent_manifest, 'topology validation.parent_manifest'),
+    target_manifest: normalizeManifest(validation.target_manifest, 'topology validation.target_manifest'),
+    environment_sha256: textValue(validation.environment_sha256, 'topology validation.environment_sha256'),
+    compatibility_sha256: textValue(validation.compatibility_sha256, 'topology validation.compatibility_sha256'),
+    statements: stringList(validation.statements, 'topology validation.statements'),
+    objects: asArray(validation.objects, 'topology validation.objects').map(normalizeObjectPlan),
+    requires_processing_pause: booleanValue(validation.requires_processing_pause, 'topology validation.requires_processing_pause'),
+    required_before_activation: stringList(validation.required_before_activation, 'topology validation.required_before_activation'),
+  };
+}
+
+/** Serialize a u64 as a bare JSON number without passing through a JavaScript double. */
+function u64Literal(value: WireU64, context: string): string {
+  return wireU64(value, context);
+}
+
+function manifestJson(manifest: CatalogManifestRef): string {
+  return `{"version":${manifest.version},"sha256":${JSON.stringify(manifest.sha256)},"encoded_len":${u64Literal(manifest.encoded_len, 'manifest.encoded_len')},"entry_count":${manifest.entry_count}}`;
+}
+
+/** Exact `ClusterTopologyRequest` body. The engine denies unknown fields. */
+export function topologyRequestBody(request: ClusterTopologyRequest): string {
+  if (!isOperationUuid(request.operation_id)) throw new Error('operation_id must be a non-nil lowercase UUID.');
+  if (request.statements.length === 0) throw new Error('A topology request needs at least one statement.');
+  return `{"operation_id":${JSON.stringify(request.operation_id)},"expected_parent_version":${u64Literal(request.expected_parent_version, 'expected_parent_version')},"statements":${JSON.stringify(request.statements)}}`;
+}
+
+/** Exact `TopologyValidationRequest` body. */
+export function topologyValidationBody(expectedParentVersion: WireU64, statements: string[]): string {
+  return `{"expected_parent_version":${u64Literal(expectedParentVersion, 'expected_parent_version')},"statements":${JSON.stringify(statements)}}`;
+}
+
+/** Exact `ClusterTopologyAdoptionRequest` body. */
+export function topologyAdoptionBody(request: ClusterTopologyAdoptionRequest): string {
+  if (!isOperationUuid(request.operation_id)) throw new Error('operation_id must be a non-nil lowercase UUID.');
+  return `{"operation_id":${JSON.stringify(request.operation_id)},"expected_manifest":${manifestJson(request.expected_manifest)},"expected_deployment_id":${JSON.stringify(request.expected_deployment_id)},"coordinated_upgrade_complete":${request.coordinated_upgrade_complete ? 'true' : 'false'}}`;
 }
 
 function normalizeConnectors(value: unknown): ConnectorsResponse {
@@ -631,6 +1087,9 @@ function normalizeSqlResponse(value: unknown): SqlResponse {
       : {}),
     ...(data === undefined ? {} : { data }),
     ...(result.truncated === true ? { truncated: true } : {}),
+    ...(result.topology_operation === undefined || result.topology_operation === null
+      ? {}
+      : { topology_operation: normalizeTopologyOperation(result.topology_operation) }),
   };
 }
 
@@ -816,6 +1275,11 @@ export const api = {
     return normalizeConnectors(await requestJson<unknown>('/api/v1/connectors'));
   },
 
+  async listProcessFunctions(): Promise<ProcessFunctionInfo[]> {
+    return asArray(await requestJson<unknown>('/api/v1/process-functions'), 'process functions response')
+      .map(normalizeProcessFunction);
+  },
+
   async executeSql(sql: string): Promise<SqlResponse> {
     const value = await requestJson<unknown>('/api/v1/sql', {
       method: 'POST',
@@ -914,6 +1378,48 @@ export const api = {
         completed_this_runtime: wireU64(row.completed_this_runtime, 'checkpoint status.completed_this_runtime'),
       };
     });
+  },
+
+  /** 404 means a single-node server (or a build without the cluster feature). */
+  async getClusterTopology(): Promise<ClusterTopologyStatus> {
+    return normalizeTopologyStatus(await requestJson<unknown>('/api/v1/cluster/topology'));
+  },
+
+  /** Effect-free; certifies only the answering process's local candidate plan. */
+  async validateClusterTopology(expectedParentVersion: WireU64, statements: string[]): Promise<ClusterTopologyValidation> {
+    return normalizeTopologyValidation(await requestJson<unknown>('/api/v1/cluster/topology/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: topologyValidationBody(expectedParentVersion, statements),
+    }));
+  },
+
+  /**
+   * Durable admission (HTTP 202). Followers forward to the leader. After a
+   * 503/504 the outcome is uncertain: read the operation and retry with the
+   * same identity and payload, never a fresh UUID.
+   */
+  async submitClusterTopology(request: ClusterTopologyRequest): Promise<TopologyAdmissionStatus> {
+    return normalizeTopologyOperation(await requestJson<unknown>('/api/v1/cluster/topology/operations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: topologyRequestBody(request),
+    }));
+  },
+
+  async getClusterTopologyOperation(operationId: string): Promise<TopologyAdmissionStatus> {
+    if (!isOperationUuid(operationId)) throw new Error('Operation ID must be a non-nil lowercase UUID.');
+    return normalizeTopologyOperation(
+      await requestJson<unknown>(`/api/v1/cluster/topology/operations/${encodeURIComponent(operationId)}`),
+    );
+  },
+
+  async adoptClusterTopology(request: ClusterTopologyAdoptionRequest): Promise<LegacyTopologyBaseline> {
+    return normalizeBaseline(await requestJson<unknown>('/api/v1/cluster/topology/adopt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: topologyAdoptionBody(request),
+    }));
   },
 
   async stopPipeline(local = false): Promise<PipelineControlResponse> {

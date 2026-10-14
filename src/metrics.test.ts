@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  M, histogramMean, histogramQuantile, parsePrometheusText, rate, subsystemOf, value,
-  valueMatching,
+  M, hasFamilyPrefix, histogramMean, histogramQuantile, parsePrometheusText, rate, samples,
+  subsystemOf, value, valueMatching,
 } from './metrics';
 import type { MetricsSnapshot } from './metrics';
 
-const ENGINE_SHA = 'f905741c3730bdf4733fd3b0501e45ab31518d89';
+const ENGINE_SHA = 'bd8f85e82ac3c23a5c3f4acc3500e20e79e15a56';
 
 describe(`LaminarDB Prometheus contract at ${ENGINE_SHA}`, () => {
   it('parses types, escaped labels, gauges, counters, and histograms', () => {
@@ -59,5 +59,31 @@ laminardb_pipeline_watermark NaN
     expect(Object.values(M)).not.toContain('laminardb_state_hot_bytes');
     expect(subsystemOf(M.checkpointBarrierLocal)).toBe('Checkpointing');
     expect(subsystemOf(M.clusterSubscriptionManifestRefresh)).toBe('Cluster subscriptions');
+  });
+
+  it('groups the 0.32 connector, admission and schema-resolution families', () => {
+    expect(subsystemOf(M.icebergSinkCommittedCheckpoint)).toBe('Iceberg connector');
+    expect(subsystemOf(M.icebergSourceSnapshotLag)).toBe('Iceberg connector');
+    expect(subsystemOf(M.schemaResolutionTotal)).toBe('Schema resolution');
+    expect(subsystemOf(M.sourceQueueReservedBytes)).toBe('Source admission');
+    expect(subsystemOf(M.placementOwnedVnodes)).toBe('Cluster & recovery');
+    expect(subsystemOf(M.postgresCdcOrphanedSlots)).toBe('Postgres CDC');
+    expect(subsystemOf(M.mongoCdcSnapshotInProgress)).toBe('MongoDB connector');
+    expect(subsystemOf('laminardb_websocket_sink_connected_clients')).toBe('WebSocket connector');
+    expect(subsystemOf(M.cycleExecuteDuration)).toBe('Engine');
+    expect(subsystemOf(M.operatorProcessDuration)).toBe('Engine');
+    // Registered as `laminar_schema_resolution_*` inside the `laminardb` registry.
+    expect(M.schemaResolutionSeconds).toBe('laminardb_laminar_schema_resolution_seconds');
+  });
+
+  it('keeps Kafka reader-lag labels so lag can be shown per source, topic and partition', () => {
+    const snapshot = parsePrometheusText(`# TYPE laminardb_kafka_source_reader_lag_offsets gauge
+laminardb_kafka_source_reader_lag_offsets{instance="a",pipeline="p",source="orders",topic="orders",partition="0"} 12
+laminardb_kafka_source_reader_lag_offsets{instance="a",pipeline="p",source="orders",topic="orders",partition="1"} 3
+`);
+    expect(samples(snapshot, M.kafkaSourceReaderLag).map((sample) => [sample.labels.partition, sample.value]))
+      .toEqual([['0', 12], ['1', 3]]);
+    expect(hasFamilyPrefix(snapshot, 'laminardb_kafka_source_')).toBe(true);
+    expect(hasFamilyPrefix(snapshot, 'laminardb_iceberg_')).toBe(false);
   });
 });

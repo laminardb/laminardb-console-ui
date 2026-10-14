@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, AlertCircle, CheckCircle, Cpu, Layers, Pause, PlayCircle, Radio,
+  Activity, AlertCircle, CheckCircle, Cpu, GitMerge, Layers, Pause, PlayCircle, Radio,
   RefreshCw, Server, ShieldAlert, X, Zap
 } from 'lucide-react';
 import { ApiError, api } from '../api';
 import type {
-  AssignmentSnapshot, CheckpointStatusRow, ClusterStatusResponse, LeaderResponse, NodeInfo,
+  AssignmentSnapshot, CheckpointStatusRow, ClusterStatusResponse, ClusterTopologyStatus, LeaderResponse,
+  NodeInfo,
 } from '../api';
 import {
   M, fetchMetricsSnapshot, formatBytes, formatCompact, formatRate, formatSeconds,
@@ -89,6 +90,7 @@ export default function OverviewTab() {
   const [vnodes, setVnodes] = useState<AssignmentSnapshot | null>(null);
   const [leaderInfo, setLeaderInfo] = useState<LeaderResponse | null>(null);
   const [clusterStatus, setClusterStatus] = useState<ClusterStatusResponse | null>(null);
+  const [topology, setTopology] = useState<ClusterTopologyStatus | null>(null);
   const [checkpoints, setCheckpoints] = useState<CheckpointStatusRow[]>([]);
   const [clusterError, setClusterError] = useState('');
   const [metricsError, setMetricsError] = useState('');
@@ -104,14 +106,17 @@ export default function OverviewTab() {
   const [, setTick] = useState(0);
 
   const fetchAll = useCallback(async () => {
-    const [nodesList, vnodesMap, leaderObj, clusterStat, checkpointsList, pipelineStat] = await Promise.allSettled([
+    const [nodesList, vnodesMap, leaderObj, clusterStat, checkpointsList, pipelineStat, topologyStat] = await Promise.allSettled([
       api.getClusterNodes(),
       api.getClusterVnodes(),
       api.getClusterLeader(),
       api.getClusterStatus(),
       api.getClusterCheckpoints(),
       api.getPipelineStatus(),
+      api.getClusterTopology(),
     ]);
+    if (topologyStat.status === 'fulfilled') setTopology(topologyStat.value);
+    else if (topologyStat.reason instanceof ApiError && topologyStat.reason.status === 404) setTopology(null);
 
     const clusterMode = clusterStat.status === 'fulfilled';
     if (clusterMode) {
@@ -255,6 +260,7 @@ export default function OverviewTab() {
   const recoveryFailures = value(snap, M.coordinatedRecoveryFailures);
   const framesLost = value(snap, M.shuffleDeliveryLossIncidents);
   const blastRadius = value(snap, M.placementBlastRadius);
+  const ownedVnodes = value(snap, M.placementOwnedVnodes);
 
   // Checkpoint summary
   const ckptEpoch = value(snap, M.checkpointEpoch);
@@ -383,6 +389,20 @@ export default function OverviewTab() {
         </div>
       )}
 
+      {topology?.live_migration && (
+        <div className="notice notice-warning" role="status">
+          <ShieldAlert size={16} aria-hidden="true" />
+          <span>Topology v{topology.live_migration} is committed but not yet settled. The vnode owner map is frozen — do not scale in or out until it clears (see the Topology tab).</span>
+        </div>
+      )}
+
+      {topology?.catalog.state === 'legacy_sealed' && (
+        <div className="notice notice-warning" role="status">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span>This cluster’s catalog predates versioned topology. Adopt it on the Topology tab before running DDL against the running cluster.</span>
+        </div>
+      )}
+
       {pipelineState === 'Faulted' && pipelineLastError && (
         <div className="glass-card" role="alert" style={{ borderColor: 'hsl(var(--status-error))', background: 'rgba(239, 68, 68, 0.05)', padding: 12, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <ShieldAlert size={16} style={{ color: 'hsl(var(--status-error))', marginTop: 2 }} />
@@ -394,7 +414,7 @@ export default function OverviewTab() {
       )}
 
       {/* Topology cards */}
-      <div className="grid-container grid-cols-3">
+      <div className={`grid-container ${topology ? 'grid-cols-4' : 'grid-cols-3'}`}>
         <div className="glass-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>Leader Node</span>
@@ -443,10 +463,28 @@ export default function OverviewTab() {
           </div>
           <div style={{ fontSize: 12, color: 'hsl(var(--text-secondary))', marginTop: 4 }}>
             {vnodes
-              ? `Assignment ${vnodes.version} · partition ABI ${vnodes.partitioning_abi_version} · ${vnodes.participants.length} participants`
+              ? `Assignment ${vnodes.version} · partition ABI ${vnodes.partitioning_abi_version} · ${vnodes.participants.length} participants${ownedVnodes !== undefined ? ` · ${ownedVnodes} owned here` : ''}`
               : isClusterMode ? 'No durable assignment loaded' : 'The cluster assignment endpoint is unavailable in single-node mode'}
           </div>
         </div>
+
+        {topology && (
+          <div className="glass-card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>Topology</span>
+              <GitMerge size={16} style={{ color: '#0ea5e9' }} aria-hidden="true" />
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>
+              {topology.committed_version ? `v${topology.committed_version}` : topology.catalog.state === 'legacy_sealed' ? 'Unadopted' : 'Uninitialized'}
+            </div>
+            <div style={{ fontSize: 12, color: 'hsl(var(--text-secondary))', marginTop: 4 }}>
+              {topology.locally_active_version
+                ? `This node runs v${topology.locally_active_version}`
+                : 'Not locally active'}
+              {` · journal ${topology.journal.retained}/${topology.journal.capacity}`}
+            </div>
+          </div>
+        )}
       </div>
 
       {isClusterMode && (
