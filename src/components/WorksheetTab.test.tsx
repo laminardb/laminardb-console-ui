@@ -36,7 +36,7 @@ vi.mock('../api', async (importOriginal) => {
 import { api } from '../api';
 import WorksheetTab from './WorksheetTab';
 
-const ENGINE_SHA = 'f905741c3730bdf4733fd3b0501e45ab31518d89';
+const ENGINE_SHA = 'bd8f85e82ac3c23a5c3f4acc3500e20e79e15a56';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;

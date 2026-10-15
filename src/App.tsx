@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Activity, AlertCircle, Database, Gauge, GitBranch, Lock, Server, Settings, Zap,
+  Activity, AlertCircle, Database, Gauge, GitBranch, Lock, Network, Plug, Server, Settings, Zap,
 } from 'lucide-react';
 import { api, getConnectionConfig, saveConnectionConfig } from './api';
 import type { ConnectionProbe } from './api';
@@ -11,14 +11,18 @@ import WorksheetTab from './components/WorksheetTab';
 import CheckpointsTab from './components/CheckpointsTab';
 import MetricsTab from './components/MetricsTab';
 import LineageTab from './components/LineageTab';
+import TopologyTab from './components/TopologyTab';
+import ConnectorsTab from './components/ConnectorsTab';
 import './App.css';
 
-type TabKey = 'overview' | 'catalog' | 'worksheet' | 'checkpoints' | 'metrics' | 'lineage';
+type TabKey = 'overview' | 'topology' | 'catalog' | 'connectors' | 'worksheet' | 'checkpoints' | 'metrics' | 'lineage';
 type ConnectionStatus = 'connected' | 'degraded' | 'disconnected' | 'checking';
 
 const TABS: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'overview', label: 'Overview', icon: <Server size={16} aria-hidden="true" /> },
+  { key: 'topology', label: 'Topology', icon: <Network size={16} aria-hidden="true" /> },
   { key: 'catalog', label: 'Catalog', icon: <Database size={16} aria-hidden="true" /> },
+  { key: 'connectors', label: 'Connectors & CDC', icon: <Plug size={16} aria-hidden="true" /> },
   { key: 'worksheet', label: 'SQL worksheet', icon: <Zap size={16} aria-hidden="true" /> },
   { key: 'checkpoints', label: 'Checkpoints & state', icon: <Activity size={16} aria-hidden="true" /> },
   { key: 'metrics', label: 'Metrics', icon: <Gauge size={16} aria-hidden="true" /> },
@@ -236,7 +240,9 @@ export default function App() {
         ) : (
           <div className="tab-host">
             {activeTab === 'overview' && <OverviewTab />}
+            {activeTab === 'topology' && <TopologyTab />}
             {activeTab === 'catalog' && <CatalogTab />}
+            {activeTab === 'connectors' && <ConnectorsTab />}
             {activeTab === 'worksheet' && <WorksheetTab />}
             {activeTab === 'checkpoints' && <CheckpointsTab />}
             {activeTab === 'metrics' && <MetricsTab />}

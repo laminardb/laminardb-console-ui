@@ -4,7 +4,9 @@ import {
   RefreshCw, RotateCcw, Trash2, Zap,
 } from 'lucide-react';
 import { ApiError, api } from '../api';
-import type { MaterializedViewInfo, StreamInfo, WireU64 } from '../api';
+import type { MaterializedViewInfo, StreamInfo, TopologyAdmissionStatus, WireU64 } from '../api';
+import { trackOperation } from '../topologyOperations';
+import { TopologyOperationCard } from './TopologyOperation';
 import {
   dataFrameRowKeys,
   isClusterSubscriptionDataFrame,
@@ -51,7 +53,13 @@ type SubscriptionStatus =
   | 'error';
 
 function errorText(error: unknown, fallback: string): string {
+  if (error instanceof ApiError && error.code && !error.message.includes(error.code)) return `[${error.code}] ${error.message}`;
   return error instanceof Error ? error.message : fallback;
+}
+
+/** Statements separated by `;` outside quotes; running-cluster DDL becomes one migration each. */
+function countStatements(sql: string): number {
+  return sql.split(/;(?=(?:[^']*'[^']*')*[^']*$)/).filter((part) => part.trim() !== '').length;
 }
 
 function isDdlStatement(sql: string): boolean {
@@ -138,6 +146,8 @@ export default function WorksheetTab({ onCatalogChanged }: WorksheetTabProps) {
   const [sqlMessage, setSqlMessage] = useState('');
   const [sqlTruncated, setSqlTruncated] = useState(false);
   const [sqlError, setSqlError] = useState('');
+  const [sqlReceipt, setSqlReceipt] = useState<TopologyAdmissionStatus | null>(null);
+  const [uncertainOperation, setUncertainOperation] = useState('');
 
   const [streams, setStreams] = useState<StreamInfo[]>([]);
   const [materializedViews, setMaterializedViews] = useState<MaterializedViewInfo[]>([]);
@@ -231,9 +241,20 @@ export default function WorksheetTab({ onCatalogChanged }: WorksheetTabProps) {
     setSqlMessage('');
     setSqlError('');
     setSqlTruncated(false);
+    setSqlReceipt(null);
+    setUncertainOperation('');
     try {
       const result = await api.executeSql(sqlText);
       setSqlTruncated(Boolean(result.truncated));
+      if (result.topology_operation) {
+        // HTTP 202: admitted as a cluster topology migration, not yet applied.
+        trackOperation({ operation_id: result.topology_operation.operation_id, origin: 'sql', statements: [sqlText.trim()] });
+        setSqlReceipt(result.topology_operation);
+        setSqlMessage(countStatements(sqlText) > 1
+          ? `${result.result_type}${result.object_name ? ` ${result.object_name}` : ''} admitted. Each statement in a running cluster becomes its own migration; this receipt is for the last one. Use the Topology tab to apply several statements atomically.`
+          : `${result.result_type}${result.object_name ? ` ${result.object_name}` : ''} admitted as an asynchronous topology migration.`);
+        return;
+      }
       if (result.data) {
         setSqlResult(result.data);
       } else if (result.rows_affected !== undefined) {
@@ -247,6 +268,11 @@ export default function WorksheetTab({ onCatalogChanged }: WorksheetTabProps) {
       }
     } catch (error) {
       setSqlError(errorText(error, 'SQL execution failed.'));
+      if (error instanceof ApiError && error.operationId) {
+        // Uncertain outcome: the migration may have been admitted under this identity.
+        trackOperation({ operation_id: error.operationId, origin: 'sql', statements: [sqlText.trim()] });
+        setUncertainOperation(error.operationId);
+      }
     } finally {
       setSqlLoading(false);
     }
@@ -519,6 +545,19 @@ export default function WorksheetTab({ onCatalogChanged }: WorksheetTabProps) {
 
         {sqlError && <div className="notice notice-error" role="alert"><AlertCircle size={16} aria-hidden="true" /><span>{sqlError}</span></div>}
         {sqlMessage && <div className="notice notice-success" role="status"><CheckCircle size={16} aria-hidden="true" /><span>{sqlMessage}</span></div>}
+        {sqlReceipt && (
+          <TopologyOperationCard
+            operationId={sqlReceipt.operation_id}
+            initial={sqlReceipt}
+            onTerminal={(status) => {
+              if (status.state.phase === 'active') {
+                onCatalogChanged?.();
+                void refreshTargets();
+              }
+            }}
+          />
+        )}
+        {uncertainOperation && <TopologyOperationCard operationId={uncertainOperation} />}
         {sqlTruncated && (
           <div className="notice notice-warning" role="status">
             <AlertTriangle size={16} aria-hidden="true" />

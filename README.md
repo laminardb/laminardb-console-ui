@@ -1,18 +1,20 @@
 # LaminarDB Console
 
-An operator and development console for LaminarDB. This branch is reviewed against LaminarDB `0.30.0` at pre-merge engine branch `feature/cluster-subscriptions`, commit `f905741c3730bdf4733fd3b0501e45ab31518d89` (based on `main` commit `fb88ca9190bbcd6cf8c25242502facfba723c213`).
+An operator and development console for LaminarDB. This branch is reviewed against LaminarDB `0.32.0` at engine `main` commit `bd8f85e82ac3c23a5c3f4acc3500e20e79e15a56` (the previous review, 0.30 cluster subscriptions, merged as `e3ad6123`).
 
 The console provides:
 
 - health, readiness, pipeline lifecycle, cluster membership, leader, and exact vnode-assignment views;
+- cluster topology migrations: versioned catalog status, legacy adoption, effect-free validation, atomic submission with safe identity reuse, durable phase tracking, and ownership/rescale guidance;
 - HTTP SQL execution plus browser WebSocket subscriptions, including checkpoint-committed cluster aggregate streams;
-- source, sink, stream, materialized-view, connector, and lineage inspection;
+- source, sink, stream, materialized-view, process-function, connector, and lineage inspection, with schema-capability-aware DDL generation for Kafka, CDC (PostgreSQL, MongoDB, Delta change data feed), lakehouse and other connectors;
+- connector and CDC health: snapshot progress, replication lag and orphaned slots, Kafka reader lag per partition, Iceberg/Delta commit state, schema resolution and source-queue admission;
 - current checkpoint status, manual checkpoints, managed-state accounting, and checkpoint latency views;
 - a raw Prometheus browser and charts built only from metrics registered by the pinned engine;
 - lossless handling of Rust `u64` values and Arrow integer/decimal JSON;
 - session-scoped bearer credentials, explicit mutation confirmations, secret-aware SQL/config display, keyboard-safe dialogs, reduced-motion support, and accessible status/table/chart summaries.
 
-The complete implementation-derived compatibility record is [docs/laminardb-v0.30-console-contract.md](docs/laminardb-v0.30-console-contract.md). Read it before using this console with a different `0.30.0` build or later engine commit.
+The complete implementation-derived compatibility record is [docs/laminardb-v0.32-console-contract.md](docs/laminardb-v0.32-console-contract.md). Read it before using this console with a different `0.32.0` build or later engine commit.
 
 ## Requirements
 
@@ -30,7 +32,7 @@ console_token = "replace-with-a-secret"
 console_cors_allowed_origins = ["http://localhost:5173"]
 ```
 
-Leaving `console_token` unset makes the control plane unauthenticated; the engine documents that as loopback/development behaviour. Leaving `console_cors_allowed_origins` unset enables its legacy permissive CORS policy.
+Leaving `console_token` unset makes the control plane unauthenticated, which the engine now permits only for a loopback `bind`. Leaving `console_cors_allowed_origins` unset enables its legacy permissive CORS policy.
 
 ## Develop
 
@@ -63,13 +65,16 @@ npm audit
 - Cluster WebSocket data carries all four of `stream_generation`, `partition`, `partition_sequence`, and `committed_epoch` (the fields are absent together on local frames); the console uses this durable identity for replay deduplication. Resume tokens are not exposed by the current WebSocket query contract.
 - Cluster start/stop peer fan-out is fire-and-forget. Success proves the local operation, not cluster-wide convergence.
 - `/api/v1/cluster/checkpoints` reports one current row, not checkpoint history. Manual `RESTORE FROM CHECKPOINT` is not implemented.
+- In a running cluster, SOURCE/STREAM/SINK DDL is an asynchronous topology migration (HTTP 202 receipt), not an applied change. A migration is irreversible once Committed; the console tracks it until Active or Aborted. Materialized views, tables and lookups are not migratable, and there is no rescale API — scale out by starting a node with a new `node_id`, scale in with SIGTERM, and do neither while a migration is still settling (`live_migration`).
+- Legacy adoption needs the deployment UUID from the checkpoint store; no HTTP route exposes it before adoption. Topology activation evidence is per node.
+- Hyphenated connector names must be quoted in DDL (`FROM "postgres-cdc"`); the generated SQL does this.
 - The schema-versioned local cluster diagnostic routes are intentionally outside console CORS and are not rendered by this SPA.
-- Connector discovery reports compiled streaming roles and option metadata, not delivery or cluster-admission guarantees.
+- Connector discovery reports compiled streaming roles, option metadata and schema capabilities, not delivery or cluster-admission guarantees. Connector metric families other than Kafka reader lag carry no connector-name label, so a second same-type connector on one node is not separately visible.
 
 ## Updating the engine pin
 
-Do not update only the version label. Once the engine feature merges, fetch `main`, record the merge SHA, diff it against the feature pin above, and update together:
+Do not update only the version label. Fetch `main`, record the new SHA, diff it against the pin above, and update together:
 
 - `src/contract.ts`;
-- `docs/laminardb-v0.30-console-contract.md` (or the next-version contract);
+- `docs/laminardb-v0.32-console-contract.md` (or the next-version contract);
 - the SHA-pinned protocol fixture suites.

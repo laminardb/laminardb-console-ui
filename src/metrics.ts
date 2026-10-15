@@ -173,6 +173,20 @@ export function labeledValues(
   return Array.from(byLabel, ([label, v]) => ({ label, value: v })).sort((a, b) => b.value - a.value);
 }
 
+/** Every finite sample of a family with its full label set (constant labels included). */
+export function samples(snap: MetricsSnapshot | null, name: string): MetricSample[] {
+  return snap?.families.get(name)?.samples ?? [];
+}
+
+/** Whether any family with this prefix appears in the scrape (connector instantiated). */
+export function hasFamilyPrefix(snap: MetricsSnapshot | null, prefix: string): boolean {
+  if (!snap) return false;
+  for (const name of snap.families.keys()) {
+    if (name.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
 /** Counter rate per second between two snapshots. Clamped at 0 across restarts. */
 export function rate(
   prev: MetricsSnapshot | null,
@@ -442,6 +456,94 @@ export const M = {
   clusterSubscriptionCheckpointPrepare: 'laminardb_cluster_subscription_checkpoint_prepare_seconds',
   clusterSubscriptionCommitVisibility: 'laminardb_cluster_subscription_commit_visibility_seconds',
   clusterSubscriptionManifestRefresh: 'laminardb_cluster_subscription_gateway_manifest_refresh_seconds',
+  // Ownership and bounded source admission (0.32)
+  placementOwnedVnodes: 'laminardb_placement_owned_vnodes',
+  sourceQueueReservedBytes: 'laminardb_source_queue_reserved_bytes',
+  // Control-plane schema resolution. Registered with its own `laminar_` prefix
+  // inside the `laminardb` registry, so the scraped name is double-prefixed.
+  schemaResolutionSeconds: 'laminardb_laminar_schema_resolution_seconds',
+  schemaResolutionTotal: 'laminardb_laminar_schema_resolution_total',
+  schemaResolutionActive: 'laminardb_laminar_schema_resolution_active',
+  // Kafka source (process-wide unless noted)
+  kafkaSourceRecordsPolled: 'laminardb_kafka_source_records_polled_total',
+  kafkaSourceBytesPolled: 'laminardb_kafka_source_bytes_polled_total',
+  kafkaSourceErrors: 'laminardb_kafka_source_errors_total',
+  kafkaSourceCommits: 'laminardb_kafka_source_commits_total',
+  kafkaSourceCommitFailures: 'laminardb_kafka_source_commit_failures_total',
+  kafkaSourceRebalances: 'laminardb_kafka_source_rebalances_total',
+  kafkaSourceSchemaCacheHits: 'laminardb_kafka_source_schema_cache_hits_total',
+  kafkaSourceSchemaCacheMisses: 'laminardb_kafka_source_schema_cache_misses_total',
+  kafkaSourceSchemaFetchFailures: 'laminardb_kafka_source_schema_fetch_failures_total',
+  kafkaSourceSchemaUnresolvedRecords: 'laminardb_kafka_source_schema_unresolved_records',
+  // Per-source (`source` const label) and per-`topic`/`partition` progress.
+  kafkaSourceReaderLag: 'laminardb_kafka_source_reader_lag_offsets',
+  kafkaSourceLagSampleAvailable: 'laminardb_kafka_source_lag_sample_available',
+  kafkaSourceLagSampleTimestamp: 'laminardb_kafka_source_lag_sample_timestamp_seconds',
+  kafkaSourceLastBatchTimestamp: 'laminardb_kafka_source_last_batch_timestamp_seconds',
+  // Kafka sink (no transactional families exist; exactly-once is not separately metered)
+  kafkaSinkRecordsWritten: 'laminardb_kafka_sink_records_written_total',
+  kafkaSinkBytesWritten: 'laminardb_kafka_sink_bytes_written_total',
+  kafkaSinkErrors: 'laminardb_kafka_sink_errors_total',
+  kafkaSinkDlqRecords: 'laminardb_kafka_sink_dlq_records_total',
+  kafkaSinkSerializationErrors: 'laminardb_kafka_sink_serialization_errors_total',
+  kafkaSinkProduceLatencySumUs: 'laminardb_kafka_sink_produce_latency_sum_us',
+  kafkaSinkProduceLatencyCount: 'laminardb_kafka_sink_produce_latency_count',
+  kafkaSinkProduceLatencyMaxUs: 'laminardb_kafka_sink_produce_latency_max_us',
+  // PostgreSQL CDC
+  postgresCdcEvents: 'laminardb_postgres_cdc_events_received_total',
+  postgresCdcBytes: 'laminardb_postgres_cdc_bytes_received_total',
+  postgresCdcInserts: 'laminardb_postgres_cdc_inserts_total',
+  postgresCdcUpdates: 'laminardb_postgres_cdc_updates_total',
+  postgresCdcDeletes: 'laminardb_postgres_cdc_deletes_total',
+  postgresCdcTransactions: 'laminardb_postgres_cdc_transactions_total',
+  postgresCdcSnapshotRows: 'laminardb_postgres_cdc_snapshot_rows_total',
+  postgresCdcConfirmedFlushLsn: 'laminardb_postgres_cdc_confirmed_flush_lsn',
+  postgresCdcReplicationLagBytes: 'laminardb_postgres_cdc_replication_lag_bytes',
+  postgresCdcOrphanedSlots: 'laminardb_postgres_cdc_orphaned_slots',
+  // PostgreSQL sink
+  postgresSinkRecordsWritten: 'laminardb_postgres_sink_records_written_total',
+  postgresSinkErrors: 'laminardb_postgres_sink_errors_total',
+  postgresSinkChangelogDeletes: 'laminardb_postgres_sink_changelog_deletes_total',
+  // MongoDB CDC / sink
+  mongoCdcEvents: 'laminardb_mongodb_cdc_events_received_total',
+  mongoCdcErrors: 'laminardb_mongodb_cdc_errors_total',
+  mongoCdcInserts: 'laminardb_mongodb_cdc_inserts_total',
+  mongoCdcUpdates: 'laminardb_mongodb_cdc_updates_total',
+  mongoCdcReplaces: 'laminardb_mongodb_cdc_replaces_total',
+  mongoCdcDeletes: 'laminardb_mongodb_cdc_deletes_total',
+  mongoCdcLifecycleEvents: 'laminardb_mongodb_cdc_lifecycle_events_total',
+  mongoCdcReconnects: 'laminardb_mongodb_cdc_reconnects_total',
+  mongoCdcMetadataSkipped: 'laminardb_mongodb_cdc_metadata_events_skipped_total',
+  mongoCdcSnapshotDocuments: 'laminardb_mongodb_cdc_snapshot_documents_total',
+  mongoCdcSnapshotInProgress: 'laminardb_mongodb_cdc_snapshot_in_progress',
+  mongoSinkRecordsWritten: 'laminardb_mongodb_sink_records_written_total',
+  mongoSinkErrors: 'laminardb_mongodb_sink_errors_total',
+  // Delta / lakehouse sinks
+  lakehouseSinkRowsFlushed: 'laminardb_lakehouse_sink_rows_flushed_total',
+  lakehouseSinkCommits: 'laminardb_lakehouse_sink_commits_total',
+  lakehouseSinkErrors: 'laminardb_lakehouse_sink_errors_total',
+  lakehouseSinkEpochsRolledBack: 'laminardb_lakehouse_sink_epochs_rolled_back_total',
+  deltaSinkLastVersion: 'laminardb_delta_sink_last_version',
+  // Iceberg source
+  icebergSourceCurrentSnapshot: 'laminardb_iceberg_source_current_snapshot_id',
+  icebergSourceProcessedSnapshot: 'laminardb_iceberg_source_processed_snapshot_id',
+  icebergSourceSnapshotLag: 'laminardb_iceberg_source_snapshot_lag',
+  icebergSourceSequenceLag: 'laminardb_iceberg_source_sequence_lag',
+  icebergSourceReadRows: 'laminardb_iceberg_source_read_rows_total',
+  icebergSourceReadStorageBytes: 'laminardb_iceberg_source_read_storage_bytes_total',
+  icebergSourceDeleteRatio: 'laminardb_iceberg_source_delete_to_data_file_ratio',
+  icebergSourceCredentialRefreshFailures: 'laminardb_iceberg_source_credential_refresh_failures_total',
+  // Iceberg sink
+  icebergSinkCommittedCheckpoint: 'laminardb_iceberg_sink_committed_checkpoint',
+  icebergSinkLastCommitTimestamp: 'laminardb_iceberg_sink_last_successful_commit_timestamp_seconds',
+  icebergSinkDataFilesWritten: 'laminardb_iceberg_sink_data_files_written_total',
+  icebergSinkSmallFilesWritten: 'laminardb_iceberg_sink_small_files_written_total',
+  icebergSinkCommitConflicts: 'laminardb_iceberg_sink_commit_conflicts_total',
+  icebergSinkCommitRetries: 'laminardb_iceberg_sink_commit_retries_total',
+  icebergSinkUnknownOutcomes: 'laminardb_iceberg_sink_unknown_outcomes_total',
+  icebergSinkPendingArtifacts: 'laminardb_iceberg_sink_pending_artifact_paths',
+  icebergSinkArtifactCleanupFailures: 'laminardb_iceberg_sink_artifact_cleanup_failures_total',
+  icebergSinkCredentialRefreshFailures: 'laminardb_iceberg_sink_credential_refresh_failures_total',
   // Process (Linux-only prometheus process collector)
   processCpuSeconds: 'laminardb_process_cpu_seconds_total',
   processResidentMemory: 'laminardb_process_resident_memory_bytes',
@@ -458,6 +560,8 @@ const SUBSYSTEM_RULES: { test: RegExp; group: string }[] = [
   { test: /^laminardb_cluster_subscription_/, group: 'Cluster subscriptions' },
   { test: /^laminardb_(placement_|coordinated_recover|shuffle_|pipeline_faults|pipeline_restarts|pipeline_cycle_errors)/, group: 'Cluster & recovery' },
   { test: /^laminardb_(pipeline_watermark|source_watermark|source_idle|stream_watermark|input_buf|shed_records|window_late|events_null_timestamp)/, group: 'Watermarks & buffering' },
+  { test: /^laminardb_source_queue_/, group: 'Source admission' },
+  { test: /^laminardb_laminar_schema_resolution_/, group: 'Schema resolution' },
   { test: /^laminardb_temporal_filter_/, group: 'Temporal filters' },
   { test: /^laminardb_lookup_/, group: 'Lookup joins' },
   { test: /^laminardb_sink_/, group: 'Sink write path' },
@@ -466,9 +570,10 @@ const SUBSYSTEM_RULES: { test: RegExp; group: string }[] = [
   { test: /^laminardb_postgres_cdc_/, group: 'Postgres CDC' },
   { test: /^laminardb_postgres_sink_/, group: 'Postgres sink' },
   { test: /^laminardb_mongodb_/, group: 'MongoDB connector' },
+  { test: /^laminardb_iceberg_/, group: 'Iceberg connector' },
   { test: /^laminardb_(lakehouse_|delta_)/, group: 'Lakehouse sinks' },
-  { test: /^laminardb_ws_(source|sink)_/, group: 'WebSocket connector' },
-  { test: /^laminardb_(events_|cycles_|batches_|queries_|cycle_duration)/, group: 'Engine' },
+  { test: /^laminardb_websocket_(source|sink)_/, group: 'WebSocket connector' },
+  { test: /^laminardb_(events_|cycles_|batches_|queries_|cycle_|operator_process_)/, group: 'Engine' },
   { test: /^laminardb_(uptime|reload|ws_connections)/, group: 'Server' },
   { test: /^laminardb_process_/, group: 'Process' },
 ];
