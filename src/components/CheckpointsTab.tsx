@@ -161,7 +161,7 @@ export default function CheckpointsTab() {
             <span>SHOW CHECKPOINT STATUS</span>
             <span>One current row; this endpoint is not checkpoint history.</span>
           </div>
-          <div className="table-scroll">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="Checkpoint status">
             <table className="meta-table">
               <caption className="sr-only">Current checkpoint status</caption>
               <thead>

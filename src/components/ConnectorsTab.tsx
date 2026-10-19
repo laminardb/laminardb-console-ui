@@ -186,7 +186,7 @@ export default function ConnectorsTab() {
           <span>Sources and sinks by connector</span>
           <span className="protocol-note">From stored DDL (SHOW CREATE); credential options are never shown</span>
         </div>
-        <div className="table-scroll">
+        <div className="table-scroll" tabIndex={0} role="region" aria-label="Sources and sinks by connector">
           <table className="meta-table">
             <caption className="sr-only">Connector type and mode of each source and sink</caption>
             <thead>
@@ -370,7 +370,7 @@ export default function ConnectorsTab() {
             <span>Kafka reader lag</span>
             <span className="protocol-note">Broker high watermark minus the next reader offset, sampled every 10 s. Not processing or recovery lag.</span>
           </div>
-          <div className="table-scroll">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="Kafka reader lag">
             <table className="meta-table">
               <caption className="sr-only">Kafka reader lag by source, topic and partition</caption>
               <thead>

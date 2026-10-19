@@ -179,7 +179,7 @@ export default function MetricsTab() {
           <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-translucent)', fontWeight: 600, fontSize: 13 }}>
             {g} <span style={{ color: 'hsl(var(--text-muted))', fontWeight: 400 }}>({fams.length})</span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto' }} tabIndex={0} role="region" aria-label={`${g} metrics`}>
             <table className="meta-table">
               <caption className="sr-only">{g} Prometheus metrics</caption>
               <thead>

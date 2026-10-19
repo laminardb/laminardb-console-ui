@@ -399,7 +399,7 @@ export default function CatalogTab() {
                       . Resolved when the relation was created and reused across restarts.
                     </p>
                   )}
-                  <div className="table-scroll">
+                  <div className="table-scroll" tabIndex={0} role="region" aria-label="Columns">
                     <table className="meta-table">
                       <caption className="sr-only">Columns in {selectedItem.name}</caption>
                       <thead>
@@ -465,7 +465,7 @@ export default function CatalogTab() {
                         <span>{note.text}</span>
                       </div>
                     ))}
-                    <div className="table-scroll">
+                    <div className="table-scroll" tabIndex={0} role="region" aria-label={`${direction} configuration keys for ${info.display_name}`}>
                       <table className="meta-table">
                         <caption className="sr-only">{direction} configuration keys for {info.display_name}</caption>
                         <thead>

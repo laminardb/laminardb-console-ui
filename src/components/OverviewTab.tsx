@@ -625,7 +625,7 @@ export default function OverviewTab() {
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-translucent)', fontWeight: 600, fontSize: 14 }}>
           Cluster Members
         </div>
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ overflowX: 'auto' }} tabIndex={0} role="region" aria-label="Cluster members">
           <table className="meta-table">
             <caption className="sr-only">Current LaminarDB cluster membership</caption>
             <thead>
@@ -887,7 +887,7 @@ export default function OverviewTab() {
               Current SHOW CHECKPOINT STATUS row (not a history endpoint)
             </span>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto' }} tabIndex={0} role="region" aria-label="Latest durable checkpoint">
             <table className="meta-table">
               <caption className="sr-only">Latest checkpoint status</caption>
               <thead>

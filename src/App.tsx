@@ -132,7 +132,7 @@ export default function App() {
             </button>
           </div>
 
-          <nav className="nav-tabs" aria-label="Console sections">
+          <nav className="nav-tabs" aria-label="Console sections" tabIndex={usable ? undefined : 0}>
             {TABS.map((tab) => (
               <button
                 key={tab.key}

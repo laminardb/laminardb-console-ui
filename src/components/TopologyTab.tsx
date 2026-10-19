@@ -541,7 +541,7 @@ function ValidationReport({ validation }: { validation: ClusterTopologyValidatio
           This node compiled a compatible candidate: v{validation.parent_version} → v{validation.target_version} ({validation.target_manifest.entry_count} catalog entries). Scope <code>{validation.scope}</code> certifies only this process’s local plan; every owner must still agree during admission. Nothing was written.
         </span>
       </div>
-      <div className="table-scroll">
+      <div className="table-scroll" tabIndex={0} role="region" aria-label="Planned object transitions">
         <table className="meta-table">
           <caption className="sr-only">Planned object transitions</caption>
           <thead>
