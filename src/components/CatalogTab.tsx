@@ -380,7 +380,7 @@ export default function CatalogTab() {
             {(selectedItem.sql || detailDdl) && (
               <div>
                 <h4 style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 8 }}>SQL Definition</h4>
-                <pre className="code-preview">{redactSqlSecrets(detailDdl || selectedItem.sql || '')}</pre>
+                <pre className="code-preview" tabIndex={0} aria-label="Definition SQL">{redactSqlSecrets(detailDdl || selectedItem.sql || '')}</pre>
               </div>
             )}
 
@@ -399,7 +399,7 @@ export default function CatalogTab() {
                       . Resolved when the relation was created and reused across restarts.
                     </p>
                   )}
-                  <div className="table-scroll">
+                  <div className="table-scroll" tabIndex={0} role="region" aria-label="Columns">
                     <table className="meta-table">
                       <caption className="sr-only">Columns in {selectedItem.name}</caption>
                       <thead>
@@ -465,7 +465,7 @@ export default function CatalogTab() {
                         <span>{note.text}</span>
                       </div>
                     ))}
-                    <div className="table-scroll">
+                    <div className="table-scroll" tabIndex={0} role="region" aria-label={`${direction} configuration keys for ${info.display_name}`}>
                       <table className="meta-table">
                         <caption className="sr-only">{direction} configuration keys for {info.display_name}</caption>
                         <thead>
@@ -860,7 +860,7 @@ function RelationWizard({ connectors, sources, streams, mvs, pipelineState, clus
 
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
           {['1. Type', '2. Configuration', '3. Review & Execute'].map((label, i) => (
-            <div key={label} style={{ fontWeight: step === i + 1 ? 700 : 'normal', color: step === i + 1 ? '#8b5cf6' : 'hsl(var(--text-muted))', fontSize: 13 }}>{label}</div>
+            <div key={label} style={{ fontWeight: step === i + 1 ? 700 : 'normal', color: step === i + 1 ? 'hsl(var(--primary))' : 'hsl(var(--text-muted))', fontSize: 13 }}>{label}</div>
           ))}
         </div>
 
@@ -891,8 +891,8 @@ function RelationWizard({ connectors, sources, streams, mvs, pipelineState, clus
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               {typeCard('source', <Database size={24} style={{ margin: '0 auto 8px', color: '#10b981' }} />, 'Source', 'Ingest external events (Kafka, CDC, files, WebSocket…)')}
               {typeCard('sink', <Radio size={24} style={{ margin: '0 auto 8px', color: '#fbbf24' }} />, 'Sink', 'Deliver a stream to an external system')}
-              {typeCard('stream', <Zap size={24} style={{ margin: '0 auto 8px', color: '#3b82f6' }} />, 'Stream', 'Continuous SQL transformation over streams')}
-              {typeCard('mv', <Layers size={24} style={{ margin: '0 auto 8px', color: '#8b5cf6' }} />, 'Materialized View', 'Incrementally-maintained queryable state')}
+              {typeCard('stream', <Zap size={24} style={{ margin: '0 auto 8px', color: 'hsl(var(--primary))' }} />, 'Stream', 'Continuous SQL transformation over streams')}
+              {typeCard('mv', <Layers size={24} style={{ margin: '0 auto 8px', color: 'hsl(var(--primary))' }} />, 'Materialized View', 'Incrementally-maintained queryable state')}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
               <button className="btn btn-primary" type="button" disabled={!relationType} onClick={() => setStep(2)}>
@@ -1122,7 +1122,7 @@ function RelationWizard({ connectors, sources, streams, mvs, pipelineState, clus
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Generated SQL DDL</label>
-              <pre className="code-preview" style={{ maxHeight: 240, overflowY: 'auto' }}>{redactSqlSecrets(generatedSql)}</pre>
+              <pre className="code-preview" tabIndex={0} aria-label="Generated SQL" style={{ maxHeight: 240, overflowY: 'auto' }}>{redactSqlSecrets(generatedSql)}</pre>
               <span className="field-help">Credential-like option values are hidden in this preview; the statement sent to the server contains them.</span>
             </div>
             {receipt ? (

@@ -13,6 +13,8 @@ import MetricsTab from './components/MetricsTab';
 import LineageTab from './components/LineageTab';
 import TopologyTab from './components/TopologyTab';
 import ConnectorsTab from './components/ConnectorsTab';
+import logoUrl from './assets/brand/laminardb-logo.svg';
+import markUrl from './assets/brand/laminardb-mark.svg';
 import './App.css';
 
 type TabKey = 'overview' | 'topology' | 'catalog' | 'connectors' | 'worksheet' | 'checkpoints' | 'metrics' | 'lineage';
@@ -105,20 +107,9 @@ export default function App() {
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="header">
         <div className="brand">
-          <svg viewBox="0 0 40 40" width="24" height="24" aria-hidden="true" className="brand-mark">
-            <defs>
-              <linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#0ea5e9" />
-                <stop offset="100%" stopColor="#8b5cf6" />
-              </linearGradient>
-            </defs>
-            <path d="M4 8 C12 8,14 6,22 6 C30 6,32 10,36 10" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".4" />
-            <path d="M2 14 C10 14,14 11,22 11 C30 11,32 15,38 15" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".6" />
-            <path d="M0 20 C8 20,14 17,22 17 C30 17,32 21,40 21" stroke="url(#logo-g)" strokeWidth="3" fill="none" strokeLinecap="round" />
-            <path d="M2 26 C10 26,14 23,22 23 C30 23,32 27,38 27" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".6" />
-            <path d="M4 32 C12 32,14 30,22 30 C30 30,32 34,36 34" stroke="url(#logo-g)" strokeWidth="2.5" fill="none" strokeLinecap="round" opacity=".4" />
-          </svg>
-          <span>LAMINARDB CONSOLE</span>
+          <img className="brand-lockup" src={logoUrl} alt="LaminarDB" width={128} height={22} />
+          <img className="brand-mark" src={markUrl} alt="LaminarDB" width={23} height={22} />
+          <span className="brand-product">Console</span>
         </div>
 
         <div className="header-controls">
@@ -141,7 +132,7 @@ export default function App() {
             </button>
           </div>
 
-          <nav className="nav-tabs" aria-label="Console sections">
+          <nav className="nav-tabs" aria-label="Console sections" tabIndex={usable ? undefined : 0}>
             {TABS.map((tab) => (
               <button
                 key={tab.key}
@@ -227,9 +218,9 @@ export default function App() {
         {!usable ? (
           <div className="connection-empty-state">
             <div className="glass-card connection-card">
-              <Server size={56} aria-hidden="true" />
+              <img className="connection-mark" src={markUrl} alt="" width={48} height={45} />
               <h1>LaminarDB Console</h1>
-              <p>Connect to inspect catalog objects, execute SQL, monitor real metrics and checkpoints, and operate a single-node or clustered LaminarDB server.</p>
+              <p>Connect to a LaminarDB server you run to browse its catalog, execute SQL, and follow checkpoints, metrics and lineage on a single node or a cluster.</p>
               {connectionStatus === 'checking' ? (
                 <span className="checking-label"><span className="pulse-dot warning" aria-hidden="true" /> Checking the server and protected control plane…</span>
               ) : (
