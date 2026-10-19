@@ -1,18 +1,18 @@
-/* LaminarDB Systems-Grade Console Design System (Light Tech Theme matching laminardb.io) */
+/* LaminarDB Console design tokens. Brand values follow the LaminarDB brand guide
+   (laminardb/laminardb brand/README.md); status colours stay semantic. */
 :root {
-  /* Color Palette (laminardb.io) */
-  --bg-base: 210 40% 98%;         /* #f8fafc */
+  --bg-base: 80 18% 97%;         /* #f7f8f5 */
   --bg-surface: 0 0% 100%;       /* #ffffff */
   --bg-card: 0 0% 100%;          /* #ffffff */
-  
-  --primary: 201 96% 32%;        /* #0369a1 - accessible blue */
-  --primary-hover: 202 83% 25%;  /* #075985 */
-  --primary-glow: rgba(14, 165, 233, 0.06);
-  
-  --secondary: 263 70% 42%;      /* #6d28d9 */
-  --secondary-hover: 263 69% 35%;
-  
-  --accent: 199 89% 48%;         /* #0ea5e9 */
+
+  --primary: 169 40% 29%;        /* #2d695e brand accent */
+  --primary-hover: 169 42% 23%;  /* #22544b */
+  --primary-glow: rgba(45, 105, 94, 0.08);
+
+  --secondary: 172 33% 13%;      /* #162c29 brand ink */
+  --secondary-hover: 172 33% 20%;
+
+  --accent: 169 40% 29%;         /* #2d695e */
   
   /* Status Colors */
   --status-success: 142 72% 45%; /* #22c55e */
@@ -20,14 +20,14 @@
   --status-error: 0 84% 60%;     /* #ef4444 */
   
   /* Text */
-  --text-primary: 222 47% 11%;   /* #0f172a */
-  --text-secondary: 215 25% 27%; /* #334155 */
-  --text-muted: 215 16% 47%;     /* #64748b */
-  
+  --text-primary: 172 33% 13%;   /* #162c29 */
+  --text-secondary: 166 19% 23%; /* #2f4540 */
+  --text-muted: 159 11% 36%;     /* #52665f */
+
   /* Borders and Dividers */
-  --border-translucent: #e2e8f0;
-  --border-glow: #cbd5e1;
-  --border-active: #0ea5e9;
+  --border-translucent: #d4ddd7;
+  --border-glow: #b9c7bf;
+  --border-active: #2d695e;
   
   /* Fonts */
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -45,7 +45,7 @@
   margin: 0;
   padding: 0;
   scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-color: #b9c7bf transparent;
 }
 
 body {
@@ -80,15 +80,15 @@ textarea:disabled {
 }
 
 :focus-visible {
-  outline: 3px solid #0e7490;
+  outline: 3px solid #2d695e;
   outline-offset: 2px;
 }
 
 .input-field:focus-visible,
 .sql-editor:focus-visible {
-  outline: 3px solid rgba(14, 116, 144, 0.28);
+  outline: 3px solid rgba(45, 105, 94, 0.3);
   outline-offset: 0;
-  border-color: #0e7490;
+  border-color: #2d695e;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -142,18 +142,38 @@ h1, h2, h3, h4, h5, h6 {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 800;
-  font-size: 16px;
-  font-family: var(--font-display);
+  gap: 12px;
+  flex: none;
   color: hsl(var(--text-primary));
-  letter-spacing: -0.02em;
 }
 
-.brand-icon {
-  width: 24px;
-  height: 24px;
-  color: hsl(var(--primary));
+.brand-lockup,
+.brand-mark {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+
+.brand-mark {
+  display: none;
+}
+
+.brand-product {
+  padding-left: 12px;
+  border-left: 1px solid var(--border-translucent);
+  font-size: 13px;
+  font-weight: 600;
+  color: hsl(var(--text-muted));
+}
+
+@media (max-width: 1100px) {
+  .brand-lockup {
+    display: none;
+  }
+
+  .brand-mark {
+    display: block;
+  }
 }
 
 .main-content {
@@ -223,15 +243,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%);
+  background: hsl(var(--secondary));
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
 }
 
 .btn-primary:hover {
-  opacity: 0.95;
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(14, 165, 233, 0.3);
+  background: hsl(var(--primary));
 }
 
 .btn-primary:active {
@@ -251,7 +268,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .btn-danger {
-  background: #ef4444;
+  background: #c62828;
   color: #fff;
 }
 

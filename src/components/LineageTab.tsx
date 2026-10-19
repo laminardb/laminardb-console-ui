@@ -198,7 +198,7 @@ export default function LineageTab() {
             markerHeight="7"
             orient="auto-start-reverse"
           >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(14, 165, 233, 0.6)" />
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(45, 105, 94, 0.7)" />
           </marker>
         </defs>
         <g>
@@ -357,7 +357,7 @@ export default function LineageTab() {
             {/* SQL Code for node */}
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <h4 style={{ fontSize: 12, fontWeight: 600, color: 'hsl(var(--text-secondary))', marginBottom: 6 }}>Definition SQL Statement</h4>
-              <pre className="code-preview" style={{ flex: 1, margin: 0, overflow: 'auto', fontSize: '13px', lineHeight: 1.5 }}>
+              <pre className="code-preview" tabIndex={0} aria-label="Definition SQL statement" style={{ flex: 1, margin: 0, overflow: 'auto', fontSize: '13px', lineHeight: 1.5 }}>
                 {selectedGraphNode.sql
                   ? redactSqlSecrets(selectedGraphNode.sql)
                   : '-- No SQL definition is registered for this graph node.'}

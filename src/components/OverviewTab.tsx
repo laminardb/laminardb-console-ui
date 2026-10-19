@@ -418,7 +418,7 @@ export default function OverviewTab() {
         <div className="glass-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>Leader Node</span>
-            <Radio size={16} style={{ color: '#8b5cf6' }} />
+            <Radio size={16} style={{ color: 'hsl(var(--primary))' }} />
           </div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>
             {leaderInfo?.leader ? leaderInfo.leader.name : isClusterMode ? 'Unknown' : 'Not applicable'}
@@ -431,7 +431,7 @@ export default function OverviewTab() {
         <div className="glass-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>Cluster Size</span>
-            <Activity size={16} style={{ color: '#10b981' }} />
+            <Activity size={16} style={{ color: 'hsl(var(--primary))' }} />
           </div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>
             {isClusterMode ? `${clusterMembers.length} ${clusterMembers.length === 1 ? 'node' : 'nodes'}` : 'Single node'}
@@ -450,7 +450,7 @@ export default function OverviewTab() {
         <div className="glass-card">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>VNode Assignments</span>
-            <Cpu size={16} style={{ color: '#3b82f6' }} />
+            <Cpu size={16} style={{ color: 'hsl(var(--primary))' }} />
           </div>
           <div style={{ fontSize: 20, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
             {vnodes ? Object.keys(vnodes.vnodes).length : isClusterMode ? '0' : 'Not exposed'}
@@ -472,7 +472,7 @@ export default function OverviewTab() {
           <div className="glass-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: 'hsl(var(--text-muted))', letterSpacing: '0.5px' }}>Topology</span>
-              <GitMerge size={16} style={{ color: '#0ea5e9' }} aria-hidden="true" />
+              <GitMerge size={16} style={{ color: 'hsl(var(--primary))' }} aria-hidden="true" />
             </div>
             <div style={{ fontSize: 20, fontWeight: 700 }}>
               {topology.committed_version ? `v${topology.committed_version}` : topology.catalog.state === 'legacy_sealed' ? 'Unadopted' : 'Uninitialized'}

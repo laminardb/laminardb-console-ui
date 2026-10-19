@@ -61,9 +61,9 @@
 }
 
 .sidebar-item.active {
-  background: rgba(139, 92, 246, 0.08);
-  border-color: rgba(139, 92, 246, 0.2);
-  color: hsl(var(--secondary));
+  background: var(--primary-glow);
+  border-color: rgba(45, 105, 94, 0.25);
+  color: hsl(var(--primary));
   font-weight: 500;
 }
 
@@ -264,13 +264,13 @@
 
 .node-group:hover .node-rect {
   stroke: hsl(var(--primary));
-  filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.2));
+  filter: drop-shadow(0 0 4px rgba(45, 105, 94, 0.2));
 }
 
 .node-group.selected .node-rect {
   stroke: hsl(var(--primary));
   stroke-width: 2;
-  filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.3));
+  filter: drop-shadow(0 0 6px rgba(45, 105, 94, 0.25));
 }
 
 .link-line {
@@ -281,7 +281,7 @@
 }
 
 .link-line.active {
-  stroke: rgba(14, 165, 233, 0.45);
+  stroke: rgba(45, 105, 94, 0.55);
   stroke-dasharray: 6 4;
   animation: flow-dash 15s linear infinite;
 }
@@ -304,9 +304,9 @@
 }
 
 .badge-purple {
-  background: rgba(139, 92, 246, 0.15);
+  background: var(--primary-glow);
   color: hsl(var(--primary));
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(45, 105, 94, 0.3);
 }
 
 .badge-blue {
@@ -554,8 +554,9 @@
   text-align: center;
 }
 
-.connection-card > svg {
-  color: hsl(var(--primary));
+.connection-mark {
+  display: block;
+  margin-bottom: 4px;
 }
 
 .checking-label {
@@ -828,7 +829,7 @@
 }
 
 .node-group:focus-visible .node-rect {
-  stroke: #0e7490;
+  stroke: #2d695e;
   stroke-width: 3px;
 }
 
