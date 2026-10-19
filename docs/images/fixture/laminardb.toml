@@ -1,0 +1,44 @@
+# Demonstration fixture for Console captures (not a benchmark).
+sql = '''
+CREATE SOURCE trades (
+    symbol VARCHAR NOT NULL,
+    price DOUBLE NOT NULL,
+    volume BIGINT NOT NULL,
+    ts TIMESTAMP NOT NULL,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+) FROM KAFKA (
+    'bootstrap.servers' = 'ldb-kafka:9092',
+    'topic' = 'trades',
+    'group.id' = 'minute-volume',
+    'startup.mode' = 'earliest'
+) FORMAT JSON;
+
+CREATE STREAM minute_volume AS
+    SELECT symbol,
+           tumble(ts, INTERVAL '1' MINUTE) AS minute,
+           SUM(volume) AS volume,
+           MAX(price) AS high
+    FROM trades
+    GROUP BY symbol, tumble(ts, INTERVAL '1' MINUTE)
+    EMIT ON WINDOW CLOSE;
+
+CREATE SINK minute_volume_out FROM minute_volume
+    INTO KAFKA ('bootstrap.servers' = 'ldb-kafka:9092', 'topic' = 'minute-volume')
+    FORMAT JSON;
+
+CREATE SOURCE ticks FROM GENERATOR ('rows.per.second' = '5');
+
+CREATE MATERIALIZED VIEW tick_totals AS
+    SELECT COUNT(*) AS rows_seen, MAX(seq) AS last_seq
+    FROM ticks;
+'''
+
+[server]
+mode = "single"
+bind = "0.0.0.0:8080"
+console_token = "${LAMINAR_CONSOLE_TOKEN}"
+console_cors_allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://127.0.0.1:4173"]
+
+[checkpoint]
+url = "file:///var/lib/laminardb/checkpoints"
+interval = "10s"
